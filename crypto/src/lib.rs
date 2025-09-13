@@ -87,21 +87,21 @@ impl PublicKey {
     }
 
     pub fn verify_signature(&self, msg: &[u8], sig: &Signature) -> bool {
-    let dst = b"BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_NUL_";
-    let signature = match blst::min_pk::Signature::from_bytes(&sig.0) {
-        Ok(sig) => sig,
-        Err(_) => return false,
-    };
-    let pk = match blst::min_pk::PublicKey::from_bytes(&self.0) {
-        Ok(public_key) => public_key,
-        Err(_) => return false,
-    };
-    let err = signature.verify(true, &msg, dst, &[], &pk, true);
-    if err != blst::BLST_ERROR::BLST_SUCCESS {
-        return false
+        let dst = b"BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_NUL_";
+        let signature = match blst::min_pk::Signature::from_bytes(&sig.0) {
+            Ok(sig) => sig,
+            Err(_) => return false,
+        };
+        let pk = match blst::min_pk::PublicKey::from_bytes(&self.0) {
+            Ok(public_key) => public_key,
+            Err(_) => return false,
+        };
+        let err = signature.verify(true, &msg, dst, &[], &pk, true);
+        if err != blst::BLST_ERROR::BLST_SUCCESS {
+            return false
+        }
+        true
     }
-    true
-}
 }
 
 impl Default for PublicKey {
