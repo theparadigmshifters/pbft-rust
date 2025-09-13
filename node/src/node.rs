@@ -2,12 +2,10 @@ use std::{
     sync::{Arc, RwLock},
     vec,
 };
-
 use tracing::{debug, info};
-
 use crate::{api, config::AppConfig};
 
-pub async fn start_kv_node(
+pub async fn start(
     config: AppConfig,
     mut rx_cancel: tokio::sync::broadcast::Receiver<()>,
 ) -> Result<(), pbft_core::error::Error> {

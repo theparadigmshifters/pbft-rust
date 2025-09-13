@@ -1,0 +1,4 @@
+replica0: PBFT_DEV=0 ../target/release/node
+replica1: PBFT_DEV=1 ../target/release/node
+replica2: PBFT_DEV=2 ../target/release/node
+replica3: PBFT_DEV=3 ../target/release/node

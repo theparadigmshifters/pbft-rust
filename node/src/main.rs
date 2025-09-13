@@ -4,9 +4,6 @@ mod dev;
 mod kv;
 pub(crate) mod node;
 
-#[cfg(test)]
-mod api_tests;
-
 #[tokio::main]
 async fn main() {
     let subscriber = tracing_subscriber::fmt::SubscriberBuilder::default()
@@ -52,7 +49,7 @@ async fn main() {
         }
     });
 
-    node::start_kv_node(config, rx_cancel)
+    node::start(config, rx_cancel)
         .await
         .expect("failed to start kv node");
 }

@@ -7,12 +7,11 @@ use crate::{
 
 pub const DEV_VIEW_CHANGE_TIMEOUT: Duration = Duration::from_secs(5);
 
-pub static DEV_PRIVATE_KEYS: [&str; 5] = [
+pub static DEV_PRIVATE_KEYS: [&str; 4] = [
     "f27c6cd411d662857649213ebb4c85152a0dc07a832b1c7c7536513981e5310e",
     "591d6957eccbf0f4b3dbe03d9dff47cba25564035787f9b4ce04436428ae144f",
     "4beb12a2dd43aac5765556c71ff61c8ec22524bc9d9d0542de61159a83bb37b6",
     "9bfc32b4bd787a9011ba167c025eea1617232aaa5cfdc50d8e4ae72a7881ac33",
-    "cc55911ebe495c4b98aad7792a7102f2b8ea48eb97381f1599dedec67def749b",
 ];
 
 pub fn dev_config(self_id: NodeId, start_port: u16) -> Config {
@@ -56,12 +55,6 @@ pub fn dev_config(self_id: NodeId, start_port: u16) -> Config {
                     public_key: pub_key_from_priv_hex(DEV_PRIVATE_KEYS[3])
                         .expect("failed to derive public key from private key"),
                 },
-                NodeConfig {
-                    id: NodeId(4),
-                    addr: format!("http://localhost:{}", start_port + 4),
-                    public_key: pub_key_from_priv_hex(DEV_PRIVATE_KEYS[4])
-                        .expect("failed to derive public key from private key"),
-                },
             ],
         },
         checkpoint_frequency: 10,
@@ -70,7 +63,6 @@ pub fn dev_config(self_id: NodeId, start_port: u16) -> Config {
             format!("http://localhost:{}/api/v1/client/response", start_port + 1),
             format!("http://localhost:{}/api/v1/client/response", start_port + 2),
             format!("http://localhost:{}/api/v1/client/response", start_port + 3),
-            format!("http://localhost:{}/api/v1/client/response", start_port + 4),
         ],
         executor_config: ExecutorConfig {
             max_requeue_attempts_on_failure: 5,
