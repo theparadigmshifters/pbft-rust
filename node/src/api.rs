@@ -38,7 +38,7 @@ pub enum Error {
     FailedToBroadcast,
 }
 
-trait VerifySignrature {
+trait VerifySignature {
     fn verify_signature(
         &self,
         replica_id: u64,
@@ -71,7 +71,7 @@ pub struct APIContext {
 
 type HandlerContext = Arc<APIContext>;
 
-impl VerifySignrature for HandlerContext {
+impl VerifySignature for HandlerContext {
     fn verify_signature(
         &self,
         peer_id: u64,
@@ -185,7 +185,7 @@ pub struct JsonAuthenticatedExt<T: DeserializeOwned>(pub JsonAuthenticated<T>);
 #[async_trait]
 impl<S, T: DeserializeOwned> FromRequest<S, Body> for JsonAuthenticatedExt<T>
 where
-    S: VerifySignrature + Send + Sync,
+    S: VerifySignature + Send + Sync,
 {
     type Rejection = axum::response::Response;
 

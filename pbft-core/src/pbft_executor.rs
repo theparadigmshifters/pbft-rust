@@ -655,10 +655,14 @@ impl PbftExecutor {
         state: &mut PbftState,
         prepare: SignedPrepare,
     ) -> Result<Option<ProtocolMessage>> {
+        // verify signature
+        let ok = prepare.verify()?;
+        if !ok {
+            return Err(Error::InvalidSignature);
+        }
+
         let message_meta = prepare.metadata.clone();
-
         let log = &mut state.consensus_log;
-
         let idx = ConsensusLogIdx::from(&message_meta);
 
         // Since we are not guaranteed to receive pre-prepare prior to receiving first prepare messages,
@@ -728,10 +732,14 @@ impl PbftExecutor {
         state: &mut PbftState,
         commit: SignedCommit,
     ) -> Result<(Vec<ProtocolMessage>, Vec<ClientResponse>)> {
+        // verify signature
+        let ok = commit.verify()?;
+        if !ok {
+            return Err(Error::InvalidSignature);
+        }
+
         let message_meta = commit.metadata.clone();
-
         let idx = ConsensusLogIdx::from(&message_meta);
-
         let entry = state
             .consensus_log
             .entry(idx)
