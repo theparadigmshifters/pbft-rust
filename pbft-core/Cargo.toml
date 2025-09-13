@@ -7,9 +7,8 @@ edition = "2021"
 
 [dependencies]
 config = "0.13.3"
-ed25519-dalek = "1.0.1"
 futures = "0.3.28"
-hex = "0.4.3"
+base64 = "0.21"
 md5 = "0.7.0"
 # Use older version for compatibility with ed25519-dalek
 rand = "0.7"
@@ -21,6 +20,8 @@ tokio = { version = "1.28.2", features = ["tokio-macros", "tracing", "macros"] }
 tracing = "0.1.37"
 tracing-subscriber = { version = "0.3.17", features = ["json", "env-filter"] }
 uuid = { version = "1.4.1", features = ["v4", "serde"] }
+crypto = { path = "../crypto" }
+blst = { git = "https://github.com/supranational/blst", branch = "master" }
 
 [dev-dependencies]
 lazy_static = "1.4.0"

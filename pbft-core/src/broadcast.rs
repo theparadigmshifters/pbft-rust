@@ -1,6 +1,4 @@
 use std::{pin::Pin, sync::Arc, time::Duration};
-
-use ed25519_dalek::Signer;
 use futures::{stream::FuturesUnordered, Future, StreamExt};
 use serde::Serialize;
 use tracing::{debug, error};
@@ -10,7 +8,7 @@ use crate::{
         ClientRequestBroadcast, ProtocolMessageBroadcast, REPLICA_ID_HEADER,
         REPLICA_SIGNATURE_HEADER,
     },
-    config::{NodeConfig, NodeId},
+    config::{NodeConfig, NodeId, Secret},
     ClientRequest, ClientResponse, OperationAck,
 };
 
@@ -71,7 +69,7 @@ pub struct Broadcaster {
     node_self_id: NodeId,
     nodes: Vec<NodeConfig>,
     response_urls: Vec<String>,
-    keypair: Arc<ed25519_dalek::Keypair>,
+    keypair: Arc<Secret>,
 
     client: reqwest::Client,
 }
@@ -80,7 +78,7 @@ impl Broadcaster {
     pub fn new(
         node_id: NodeId,
         nodes: Vec<NodeConfig>,
-        keypair: Arc<ed25519_dalek::Keypair>,
+        keypair: Arc<Secret>,
         response_urls: Vec<String>,
     ) -> Self {
         Self {
@@ -133,7 +131,7 @@ impl Broadcaster {
             M,
             String,
             NodeId,
-            Arc<ed25519_dalek::Keypair>,
+            Arc<Secret>,
         ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>,
     {
         let mut futures = FuturesUnordered::new();
@@ -170,7 +168,7 @@ impl Broadcaster {
     pub async fn send_msg<T: Serialize>(
         client: &reqwest::Client,
         self_id: NodeId,
-        keypair: &ed25519_dalek::Keypair,
+        keypair: &Secret,
         msg: &T,
         url: &str,
     ) -> Result<()> {
@@ -178,13 +176,12 @@ impl Broadcaster {
             "failed to serialize request body",
         ))?;
 
-        let signature = keypair.sign(&body).to_bytes().to_vec();
-        let signature_hex = hex::encode(signature);
+        let signature = keypair.secret.sign_msg(&body).encode_base64();
 
         let res = client
             .post(url)
             .header(REPLICA_ID_HEADER, self_id.0)
-            .header(REPLICA_SIGNATURE_HEADER, signature_hex.to_string())
+            .header(REPLICA_SIGNATURE_HEADER, signature.to_string())
             .header(reqwest::header::CONTENT_TYPE, "application/json")
             .body(body)
             .send()
@@ -204,7 +201,7 @@ impl Broadcaster {
     async fn send_with_retires<T: Serialize + std::fmt::Debug>(
         client: reqwest::Client,
         self_id: NodeId,
-        keypair: &ed25519_dalek::Keypair,
+        keypair: &Secret,
         msg: &T,
         url: &str,
     ) -> Result<()> {

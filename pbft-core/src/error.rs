@@ -53,15 +53,9 @@ pub enum Error {
     ReplicaPrivKeyDoesNotMatchPubKey { actual: String, expected: String },
 
     #[error("Hex error: {context}: {error}")]
-    HexError {
+    Base64Error {
         context: String,
-        error: hex::FromHexError,
-    },
-
-    #[error("Ed25519 error: {context}: {error}")]
-    Ed25519Error {
-        context: String,
-        error: ed25519_dalek::SignatureError,
+        error: base64::DecodeError,
     },
 
     #[error("IO error: {context}: {error}")]
@@ -108,8 +102,8 @@ pub enum Error {
 
 // TODO: Macro for this?
 impl Error {
-    pub fn hex_error(context: &str) -> impl FnOnce(hex::FromHexError) -> Self + '_ {
-        move |error| Self::HexError {
+    pub fn base64_error(context: &str) -> impl FnOnce(base64::DecodeError) -> Self + '_ {
+        move |error| Self::Base64Error {
             context: context.to_string(),
             error,
         }
@@ -117,13 +111,6 @@ impl Error {
 
     pub fn io_error(context: &str) -> impl FnOnce(std::io::Error) -> Self + '_ {
         move |error| Self::IOError {
-            context: context.to_string(),
-            error,
-        }
-    }
-
-    pub fn ed25519_error(context: &str) -> impl FnOnce(ed25519_dalek::SignatureError) -> Self + '_ {
-        move |error| Self::Ed25519Error {
             context: context.to_string(),
             error,
         }

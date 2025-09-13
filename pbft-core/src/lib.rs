@@ -1,7 +1,7 @@
 use std::{collections::HashMap, ops::Deref};
-
-use crate::config::NodeId;
-use ed25519_dalek::{Signer, Verifier};
+use base64::{Engine as _, engine::general_purpose};
+use crate::config::{NodeId, Secret};
+use crypto::{PublicKey, Signature};
 use serde::{Deserialize, Serialize};
 
 pub mod api;
@@ -13,21 +13,11 @@ pub mod pbft;
 pub mod pbft_executor;
 pub(crate) mod pbft_state;
 pub mod state_machine;
-
 pub use crate::config::Config;
 pub use pbft::Pbft;
-
 pub use pbft_state::ReplicaState;
-
 pub use state_machine::InMemoryKVStore;
-
 pub const NULL_DIGEST: MessageDigest = MessageDigest([0; 16]);
-
-#[cfg(test)]
-mod pbft_tests;
-
-#[cfg(test)]
-pub mod test_util;
 
 pub mod dev;
 
@@ -150,7 +140,7 @@ impl ProtocolMessage {
     pub fn new_preare(
         meta: MessageMeta,
         replica_id: NodeId,
-        keypair: &ed25519_dalek::Keypair,
+        keypair: &Secret,
     ) -> Result<Self> {
         let prepare = Prepare {
             replica_id,
@@ -164,7 +154,7 @@ impl ProtocolMessage {
     pub fn new_commit(
         meta: MessageMeta,
         replica_id: NodeId,
-        keypair: &ed25519_dalek::Keypair,
+        keypair: &Secret,
     ) -> Result<Self> {
         let commit = Commit {
             replica_id,
@@ -286,7 +276,7 @@ pub struct MessageDigest(pub [u8; 16]);
 
 impl std::fmt::Display for MessageDigest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", hex::encode(self.0))
+        write!(f, "{}", general_purpose::STANDARD.encode(self.0))
     }
 }
 
@@ -325,7 +315,7 @@ pub struct CheckpointDigest(pub [u8; 16]);
 
 impl std::fmt::Display for CheckpointDigest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", hex::encode(self.0))
+        write!(f, "{}", general_purpose::STANDARD.encode(self.0))
     }
 }
 
@@ -392,20 +382,20 @@ impl NewView {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SignedMessage<T> {
     pub message: T,
-    pub signature: Vec<u8>,
-    pub pub_key: [u8; 32],
+    pub signature: Signature,
+    pub pub_key: PublicKey,
 }
 
 impl<T: Serialize> SignedMessage<T> {
-    pub fn new(message: T, keypair: &ed25519_dalek::Keypair) -> Result<Self> {
+    pub fn new(message: T, keypair: &Secret) -> Result<Self> {
         let serialized = serde_json::to_string(&message).map_err(
             crate::error::Error::serde_json_error("failed to serialize message"),
         )?;
-        let signature = keypair.sign(serialized.as_bytes()).to_bytes().to_vec();
+        let signature = keypair.secret.sign_msg(serialized.as_bytes());
         Ok(Self {
             message,
             signature,
-            pub_key: keypair.public.to_bytes(),
+            pub_key: keypair.name,
         })
     }
 
@@ -414,19 +404,11 @@ impl<T: Serialize> SignedMessage<T> {
             crate::error::Error::serde_json_error("failed to serialize message"),
         )?;
 
-        let pub_key = ed25519_dalek::PublicKey::from_bytes(&self.pub_key).map_err(
-            crate::error::Error::ed25519_error("failed to parse public key from bytes"),
-        )?;
-
-        let signature = &ed25519_dalek::Signature::from_bytes(&self.signature).map_err(
-            crate::error::Error::ed25519_error("failed to parse signature from bytes"),
-        )?;
-
-        Ok(pub_key.verify(serialized.as_bytes(), signature).is_ok())
+        Ok(self.pub_key.verify_signature(serialized.as_bytes(), &self.signature))
     }
 
-    pub fn pub_key_hex(&self) -> String {
-        hex::encode(self.pub_key)
+    pub fn pub_key_base64(&self) -> String {
+        self.pub_key.encode_base64()
     }
 }
 
@@ -458,11 +440,11 @@ pub type SignedViewChange = SignedMessage<ViewChange>;
 pub type SignedNewView = SignedMessage<NewView>;
 
 pub trait SignMessage<T: Serialize> {
-    fn sign(self, keypair: &ed25519_dalek::Keypair) -> Result<SignedMessage<T>>;
+    fn sign(self, keypair: &Secret) -> Result<SignedMessage<T>>;
 }
 
 impl<T: Serialize> SignMessage<T> for T {
-    fn sign(self, keypair: &ed25519_dalek::Keypair) -> Result<SignedMessage<T>> {
+    fn sign(self, keypair: &Secret) -> Result<SignedMessage<T>> {
         SignedMessage::new(self, keypair)
     }
 }

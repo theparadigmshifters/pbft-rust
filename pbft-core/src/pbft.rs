@@ -1,6 +1,5 @@
 use std::sync::{Arc, RwLock};
-
-use ed25519_dalek::{PublicKey, Signature, Verifier};
+use crypto::{PublicKey, Signature};
 use tracing::{debug, info};
 
 use crate::{
@@ -24,7 +23,7 @@ impl Pbft {
         config: crate::Config,
         state_machine: Arc<RwLock<dyn StateMachie>>,
     ) -> Result<Self, crate::error::Error> {
-        let keypair = Arc::new(config.node_config.get_keypair()?);
+        let keypair = Arc::new(config.node_config.get_keypair());
 
         let broadcaster = Arc::new(Broadcaster::new(
             config.node_config.self_id,
@@ -138,23 +137,15 @@ impl Pbft {
         }
         let peer = &self.nodes_config.nodes[replica_id as usize];
 
-        let pub_key_raw = hex::decode(peer.public_key.as_bytes()).map_err(
-            crate::error::Error::hex_error("failed to decode public key from hex"),
+        let public_key = PublicKey::decode_base64(&peer.public_key).map_err(
+            crate::error::Error::base64_error("failed to parse public key from bytes"),
         )?;
 
-        let public_key = PublicKey::from_bytes(&pub_key_raw).map_err(
-            crate::error::Error::ed25519_error("failed to parse public key from bytes"),
+        let signature = Signature::decode_base64(&signature).map_err(
+            crate::error::Error::base64_error("failed to parse signature from bytes"),
         )?;
 
-        let signature_raw = hex::decode(signature.as_bytes()).map_err(
-            crate::error::Error::hex_error("failed to decode signature from hex"),
-        )?;
-
-        let signature = Signature::from_bytes(&signature_raw).map_err(
-            crate::error::Error::ed25519_error("failed to parse signature from bytes"),
-        )?;
-
-        let is_ok = public_key.verify(msg, &signature).is_ok();
+        let is_ok = public_key.verify_signature(msg, &signature);
         if !is_ok {
             return Err(crate::error::Error::InvalidSignature);
         }

@@ -3,8 +3,6 @@ use rand::{RngCore};
 use zk::{AsBytes, Fr, ToHash};
 use std::fmt;
 use base64::{Engine as _, engine::general_purpose};
-use tokio::sync::mpsc::{channel, Sender};
-use tokio::sync::oneshot;
 use serde::{ser, de, Serialize, Deserialize};
 use std::array::TryFromSliceError;
 use std::convert::{TryFrom, TryInto};
@@ -87,6 +85,23 @@ impl PublicKey {
         let fr2 = Fr::dec(&mut chunk2.to_vec().into_iter()).expect("Failed to convert PublicKey to Fr");
         (fr1, fr2).hash()
     }
+
+    pub fn verify_signature(&self, msg: &[u8], sig: &Signature) -> bool {
+    let dst = b"BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_NUL_";
+    let signature = match blst::min_pk::Signature::from_bytes(&sig.0) {
+        Ok(sig) => sig,
+        Err(_) => return false,
+    };
+    let pk = match blst::min_pk::PublicKey::from_bytes(&self.0) {
+        Ok(public_key) => public_key,
+        Err(_) => return false,
+    };
+    let err = signature.verify(true, &msg, dst, &[], &pk, true);
+    if err != blst::BLST_ERROR::BLST_SUCCESS {
+        return false
+    }
+    true
+}
 }
 
 impl Default for PublicKey {
@@ -148,6 +163,12 @@ impl SecretKey {
             .map_err(|_| base64::DecodeError::InvalidLength)?;
         Ok(Self(array))
     }
+
+    pub fn sign_msg(&self, msg: &[u8]) -> Signature {
+        let dst = b"BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_NUL_";
+        let sk = blst::min_pk::SecretKey::from_bytes(&self.0).unwrap();
+        Signature(sk.sign(&msg, dst, &[]).to_bytes())
+    }
 }
 
 impl Serialize for SecretKey {
@@ -170,7 +191,7 @@ impl<'de> Deserialize<'de> for SecretKey {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct Signature(pub [u8; 96]);
 
 impl Signature {
@@ -223,36 +244,4 @@ pub fn generate_production_keypair() -> (PublicKey, SecretKey) {
     // calculate pk
     let pk = sk.sk_to_pk();
     (PublicKey(pk.to_bytes()), SecretKey(sk.to_bytes()))
-}
-
-/// This service holds the node's private key. It takes digests as input and returns a signature
-/// over the digest (through a oneshot channel).
-#[derive(Clone)]
-pub struct SignatureService {
-    channel: Sender<(Digest, oneshot::Sender<Signature>)>,
-}
-
-impl SignatureService {
-    pub fn new(secret: SecretKey) -> Self {
-        let (tx, mut rx): (Sender<(Digest, oneshot::Sender<Signature>)>, _) = channel(100);
-        tokio::spawn(async move {
-            while let Some((digest, sender)) = rx.recv().await {
-                let dst = b"BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_NUL_";
-                let sk = blst::min_pk::SecretKey::from_bytes(&secret.0).unwrap();
-                let signature = sk.sign(&digest.to_vec(), dst, &[]);
-                let _ = sender.send(Signature(signature.to_bytes()));
-            }
-        });
-        Self { channel: tx }
-    }
-
-    pub async fn request_signature(&mut self, digest: Digest) -> Signature {
-        let (sender, receiver): (oneshot::Sender<_>, oneshot::Receiver<_>) = oneshot::channel();
-        if let Err(e) = self.channel.send((digest, sender)).await {
-            panic!("Failed to send message Signature Service: {}", e);
-        }
-        receiver
-            .await
-            .expect("Failed to receive signature from Signature Service")
-    }
 }

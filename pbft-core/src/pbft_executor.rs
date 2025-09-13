@@ -2,13 +2,13 @@ use std::{
     collections::{BTreeMap, HashMap},
     sync::{Arc, Mutex, RwLock},
 };
-
+use base64::{Engine as _, engine::general_purpose};
 use tracing::{debug, error, info, warn};
 
 use crate::{
     api::{ClientRequestBroadcast, ProtocolMessageBroadcast},
     broadcast::PbftBroadcaster,
-    config::NodeId,
+    config::{NodeId, Secret},
     error::Error,
     pbft_state::{
         CheckpointConsensusState, ConsensusLogIdx, PbftState, ReplicaState, RequestConsensusState,
@@ -94,7 +94,7 @@ pub struct PbftExecutor {
     pbft_state: Arc<Mutex<PbftState>>,
     state_machine: Arc<RwLock<dyn StateMachie>>,
 
-    keypair: Arc<ed25519_dalek::Keypair>,
+    keypair: Arc<Secret>,
 
     broadcaster: Arc<dyn PbftBroadcaster>,
 }
@@ -102,7 +102,7 @@ pub struct PbftExecutor {
 impl PbftExecutor {
     pub fn new(
         config: Config,
-        keypair: Arc<ed25519_dalek::Keypair>,
+        keypair: Arc<Secret>,
         state_machine: Arc<RwLock<dyn StateMachie>>,
         broadcaster: Arc<dyn PbftBroadcaster>,
     ) -> Self {
@@ -852,7 +852,7 @@ impl PbftExecutor {
                         // so we can stop the timer.
                         if timer.trigger_digest == store_msg.digest() {
                             info!(
-                                    digest = hex::encode(timer.trigger_digest.0),
+                                    digest = general_purpose::STANDARD.encode(timer.trigger_digest.0),
                                     "message that started view change timer was applied, stopping timer",
                                 );
                             self.reset_timer(&mut state.timer);
@@ -954,7 +954,7 @@ impl PbftExecutor {
             if idx.sequence < check_seq {
                 debug!(
                     seq = idx.sequence,
-                    digest = hex::encode(req_state.digest.0),
+                    digest = general_purpose::STANDARD.encode(req_state.digest.0),
                     "marking message to discard"
                 );
                 idx_to_remove.push(*idx);
@@ -998,7 +998,7 @@ impl PbftExecutor {
                     prepares: entry
                         .prepare
                         .iter()
-                        .map(|p| (p.pub_key_hex(), p.clone()))
+                        .map(|p| (p.pub_key_base64(), p.clone()))
                         .collect(),
                 };
                 (idx.sequence, proof)
@@ -1158,7 +1158,7 @@ impl PbftExecutor {
 
         let vc_proof = vc_messages
             .iter()
-            .map(|vc| (vc.pub_key_hex(), vc.clone()))
+            .map(|vc| (vc.pub_key_base64(), vc.clone()))
             .collect();
 
         let new_view = NewView {
@@ -1251,7 +1251,7 @@ impl PbftExecutor {
             if cp_msg.digest != checkpoint.digest {
                 return Err(Error::InvalidViewChange(format!(
                     "Proof digest does not match: {}",
-                    hex::encode(cp_msg.digest.0)
+                    general_purpose::STANDARD.encode(cp_msg.digest.0)
                 )));
             }
         }
@@ -1379,7 +1379,7 @@ impl PbftExecutor {
                         // here, and we should have enough proofs.
                         .unwrap()
                         .iter()
-                        .map(|p| (p.pub_key_hex(), p.clone()))
+                        .map(|p| (p.pub_key_base64(), p.clone()))
                         .collect();
 
                 ViewChangeCheckpoint {

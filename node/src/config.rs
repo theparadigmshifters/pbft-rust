@@ -1,8 +1,8 @@
-use serde::{self, Deserialize};
 use std::{
     net::{IpAddr, Ipv4Addr},
     path::PathBuf,
 };
+use serde::{Deserialize};
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct AppConfig {

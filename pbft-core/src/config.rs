@@ -1,8 +1,14 @@
 use std::{
-    collections::HashMap, fs, path::{Path, PathBuf}, time::Duration
+    collections::HashMap, fs, time::Duration
 };
+use thiserror::Error;
+use crypto::generate_production_keypair;
+use crypto::{PublicKey, SecretKey};
 use serde::{Deserialize, Serialize};
-use crate::error::Error;
+use serde::de::DeserializeOwned;
+use std::fs::{OpenOptions};
+use std::io::BufWriter;
+use std::io::Write as _;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -30,7 +36,7 @@ impl std::fmt::Display for NodeId {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PbftNodeConfig {
     pub self_id: NodeId,
-    pub private_key_path: PathBuf,
+    pub private_key_path: String,
     pub nodes: Vec<NodeConfig>,
 }
 
@@ -48,25 +54,8 @@ pub struct ExecutorConfig {
 }
 
 impl PbftNodeConfig {
-    pub fn get_keypair(&self) -> Result<ed25519_dalek::Keypair, crate::error::Error> {
-        let keypair = load_keypair(self.private_key_path.as_path())?;
-
-        // Verify that the public key configured for this peer matches the one
-        // derived from the private key.
-        let node_id = self.self_id;
-        let configured_pub_key = hex::decode(&self.nodes[node_id.0 as usize].public_key)
-            .map_err(Error::hex_error("failed to decode public key from config"))?;
-
-        let expected_pub = ed25519_dalek::PublicKey::from_bytes(&configured_pub_key)
-            .expect("failed to parse public key from bytes");
-
-        if keypair.public != expected_pub {
-            return Err(crate::error::Error::ReplicaPrivKeyDoesNotMatchPubKey {
-                actual: hex::encode(keypair.public.as_bytes()),
-                expected: hex::encode(expected_pub.as_bytes()),
-            });
-        }
-        Ok(keypair)
+    pub fn get_keypair(&self) -> Secret {
+        Secret::read(&self.private_key_path).unwrap()
     }
 
     pub fn trusted_pub_keys(&self) -> HashMap<&str, NodeId> {
@@ -77,44 +66,69 @@ impl PbftNodeConfig {
     }
 }
 
-pub fn load_keypair(path: &Path) -> Result<ed25519_dalek::Keypair, crate::error::Error> {
-    let private_key_hex = std::fs::read(path).map_err(Error::io_error(&format!(
-        "failed to read private key from file: {:?}",
-        path
-    )))?;
-    key_pair_from_priv_hex(private_key_hex.as_slice())
-}
-
-pub fn key_pair_from_priv_hex(
-    private_key_hex: &[u8],
-) -> Result<ed25519_dalek::Keypair, crate::error::Error> {
-    let private_key = hex::decode(private_key_hex).map_err(Error::hex_error(
-        "failed to decode private key from hex-encoded file contents",
-    ))?;
-
-    let secret_key = ed25519_dalek::SecretKey::from_bytes(&private_key).map_err(
-        crate::error::Error::ed25519_error("failed to parse private key from file contents"),
-    )?;
-
-    let pk: ed25519_dalek::PublicKey = (&secret_key).into();
-    let keypair = ed25519_dalek::Keypair {
-        secret: secret_key,
-        public: pk,
-    };
-
-    Ok(keypair)
-}
-
-pub fn pub_key_from_priv_hex(priv_key_hex: &str) -> Result<String, crate::error::Error> {
-    let keypair = key_pair_from_priv_hex(priv_key_hex.as_bytes())?;
-    let pub_key_hex = hex::encode(keypair.public.as_bytes());
-    Ok(pub_key_hex)
-}
-
 struct GenericDefault<const U: u32>;
 
 impl<const U: u32> GenericDefault<U> {
     fn value() -> u32 {
         U
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum ConfigError {
+    #[error("Failed to read config file '{file}': {message}")]
+    ReadError { file: String, message: String },
+
+    #[error("Failed to write config file '{file}': {message}")]
+    WriteError { file: String, message: String },
+}
+
+pub trait Export: Serialize + DeserializeOwned {
+    fn read(path: &str) -> Result<Self, ConfigError> {
+        let reader = || -> Result<Self, std::io::Error> {
+            let data = fs::read(path)?;
+            Ok(serde_json::from_slice(data.as_slice())?)
+        };
+        reader().map_err(|e| ConfigError::ReadError {
+            file: path.to_string(),
+            message: e.to_string(),
+        })
+    }
+
+    fn write(&self, path: &str) -> Result<(), ConfigError> {
+        let writer = || -> Result<(), std::io::Error> {
+            let file = OpenOptions::new().create(true).write(true).open(path)?;
+            let mut writer = BufWriter::new(file);
+            let data = serde_json::to_string_pretty(self).unwrap();
+            writer.write_all(data.as_ref())?;
+            writer.write_all(b"\n")?;
+            Ok(())
+        };
+        writer().map_err(|e| ConfigError::WriteError {
+            file: path.to_string(),
+            message: e.to_string(),
+        })
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Secret {
+    pub name: PublicKey,
+    pub secret: SecretKey,
+}
+
+impl Secret {
+    pub fn new() -> Self {
+        let (name, secret) = generate_production_keypair();
+        Self { name, secret }
+    }
+}
+
+impl Export for Secret {}
+
+impl Default for Secret {
+    fn default() -> Self {
+        let (name, secret) = generate_production_keypair();
+        Self { name, secret }
     }
 }
