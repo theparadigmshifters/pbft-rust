@@ -40,8 +40,4 @@ impl AppConfig {
 
         config.try_deserialize()
     }
-
-    pub fn node_url(&self) -> String {
-        format!("http://{}:{}", self.listen_addr, self.port)
-    }
 }

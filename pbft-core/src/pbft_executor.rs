@@ -6,40 +6,15 @@ use base64::{Engine as _, engine::general_purpose};
 use tracing::{debug, error, info, warn};
 
 use crate::{
-    api::{ClientRequestBroadcast, ProtocolMessageBroadcast},
-    broadcast::PbftBroadcaster,
-    config::{NodeId, Secret},
-    error::Error,
-    pbft_state::{
+    api::{ProposeBlockMsgBroadcast, ProtocolMessageBroadcast}, broadcast::PbftBroadcaster, config::{NodeId, Secret}, error::Error, pbft_state::{
         CheckpointConsensusState, ConsensusLogIdx, PbftState, ReplicaState, RequestConsensusState,
         ViewChangeTimer,
-    },
-    AcceptedRequest, Checkpoint, ClientRequest, Commit, Config,
-    MessageDigest, MessageMeta, NewView, PrePrepare, Prepare,
-    PreparedProof, ProtocolMessage, Result, SignMessage, SignedCheckpoint, SignedCommit,
-    SignedNewView, SignedPrePrepare, SignedPrepare, SignedViewChange, ViewChange,
-    ViewChangeCheckpoint, NULL_DIGEST,
+    }, Block, Checkpoint, Commit, Config, MessageDigest, MessageMeta, NewView, PrePrepare, Prepare, PreparedProof, ProposeBlockMsg, ProtocolMessage, Result, SignMessage, SignedCheckpoint, SignedCommit, SignedNewView, SignedPrePrepare, SignedPrepare, SignedViewChange, ViewChange, ViewChangeCheckpoint, NULL_DIGEST
 };
-
-pub enum ClientRequestResult {
-    NotLeader(NotLeader),
-    Accepted(u64),
-    AlreadyAccepted(HandledRequest),
-}
-
-pub struct NotLeader {
-    pub leader_id: NodeId,
-}
-
-pub struct HandledRequest {
-    pub request: AcceptedRequest,
-    pub last_applied_sequence: u64,
-    pub leader_id: u64,
-}
 
 #[derive(Debug, Clone)]
 pub enum Event {
-    RequestBroadcast(NodeId, ClientRequestBroadcast),
+    ProposeBlockBroadcast(NodeId, ProposeBlockMsgBroadcast),
     ProtocolMessage(NodeId, ProtocolMessage),
     ViewChangeTimerExpired(MessageDigest),
 }
@@ -47,8 +22,8 @@ pub enum Event {
 impl Event {
     pub fn event_info(&self) -> String {
         match self {
-            Event::RequestBroadcast(sender, req) => format!(
-                "RequestBroadcast: Sender: {}, Sequence: {})",
+            Event::ProposeBlockBroadcast(sender, req) => format!(
+                "ProposeBlockMsg: Sender: {}, Sequence: {})",
                 sender.0, req.sequence_number
             ),
             Event::ProtocolMessage(sender, cm) => format!(
@@ -125,34 +100,12 @@ impl PbftExecutor {
         }
     }
 
-    pub fn handle_client_request(&self, request: ClientRequest) -> Result<ClientRequestResult> {
+    pub fn propose_block(&self) -> Result<()> {
+        let request = ProposeBlockMsg{block: Block { payload: "test".as_bytes().to_vec() }};
         let digest = request.digest();
         info!(digest = digest.to_string(), "handling client request");
 
         let mut state = self.pbft_state.lock().unwrap();
-
-        // Check if request was already handled.
-        // Return handled request which will contain the response if already
-        // processed and latest sequence number.
-        match state.message_store.get_by_id(&request.request_id) {
-            Some(req) => {
-                debug!(
-                    request_id = request.request_id.to_string(),
-                    "request already accepted"
-                );
-                return Ok(ClientRequestResult::AlreadyAccepted(HandledRequest {
-                    request: req.clone(),
-                    last_applied_sequence: state.last_applied_seq,
-                    leader_id: self.view_leader(state.view),
-                }));
-            }
-            None => {
-                debug!(
-                    request_id = request.request_id.to_string(),
-                    "accepting new request"
-                )
-            }
-        }
 
         match state.replica_state {
             ReplicaState::Replica | ReplicaState::ViewChange => {
@@ -162,12 +115,9 @@ impl PbftExecutor {
                 );
                 // Start view change timer, if not already started
                 if state.timer.is_none() {
-                    self.start_veiw_change_timer(&mut state, digest.clone());
+                    self.start_view_change_timer(&mut state, digest.clone());
                 }
-
-                Ok(ClientRequestResult::NotLeader(NotLeader {
-                    leader_id: NodeId(self.view_leader(state.view)),
-                }))
+                Ok(())
             }
             ReplicaState::Leader { sequence } => {
                 let message_sequence = sequence + 1;
@@ -187,7 +137,6 @@ impl PbftExecutor {
                 info!(
                     digest = digest.to_string(),
                     sequence = message_sequence,
-                    request_id = request.request_id.to_string(),
                     "assigned client request sequence",
                 );
 
@@ -206,7 +155,7 @@ impl PbftExecutor {
 
                 // Broadcast the request with PrePrepare
                 self.broadcaster
-                    .broadcast_operation(ClientRequestBroadcast {
+                    .broadcast_operation(ProposeBlockMsgBroadcast {
                         request,
                         sequence_number: message_sequence,
                         pre_prepare,
@@ -214,13 +163,12 @@ impl PbftExecutor {
                 // Broadcast leader's own Prepare
                 self.broadcaster
                     .broadcast_consensus_message(ProtocolMessageBroadcast::new(prepare_cm));
-
-                Ok(ClientRequestResult::Accepted(message_sequence))
+                Ok(())
             }
         }
     }
 
-    fn start_veiw_change_timer(&self, state: &mut PbftState, digest: MessageDigest) {
+    fn start_view_change_timer(&self, state: &mut PbftState, digest: MessageDigest) {
         let tx = self.event_tx.clone();
         let digest_m = digest.clone();
         let vc_timoeut = self.config.view_change_timeout;
@@ -249,8 +197,8 @@ impl PbftExecutor {
         self.queue_event(Event::ProtocolMessage(NodeId(sender_id), msg).into())
     }
 
-    pub fn queue_request_broadcast(&self, sender_id: u64, msg: ClientRequestBroadcast) {
-        self.queue_event(Event::RequestBroadcast(NodeId(sender_id), msg).into())
+    pub fn queue_request_broadcast(&self, sender_id: u64, msg: ProposeBlockMsgBroadcast) {
+        self.queue_event(Event::ProposeBlockBroadcast(NodeId(sender_id), msg).into())
     }
 
     fn queue_event(&self, event: EventOccurance) {
@@ -319,7 +267,7 @@ impl PbftExecutor {
                     info!(event = event.event_info(), "executor processing event");
 
                     match event {
-                        Event::RequestBroadcast(sender_id, client_request_broadcast) => {
+                        Event::ProposeBlockBroadcast(sender_id, client_request_broadcast) => {
                             self.request_broadcast_event(sender_id, client_request_broadcast)
                         }
                         Event::ProtocolMessage(sender_id, consensus_message) => {
@@ -414,7 +362,7 @@ impl PbftExecutor {
     fn request_broadcast_event(
         &self,
         sender_id: NodeId,
-        client_request_broadcast: ClientRequestBroadcast,
+        client_request_broadcast: ProposeBlockMsgBroadcast,
     ) {
         match self.handle_request_broadcast(sender_id, client_request_broadcast) {
             Ok(prepare) => {
@@ -435,7 +383,7 @@ impl PbftExecutor {
     fn handle_request_broadcast(
         &self,
         sender_id: NodeId,
-        client_request_broadcast: ClientRequestBroadcast,
+        client_request_broadcast: ProposeBlockMsgBroadcast,
     ) -> Result<SignedPrepare> {
         let mut state = self.pbft_state.lock().unwrap();
 
@@ -551,7 +499,7 @@ impl PbftExecutor {
         &self,
         state: &mut PbftState,
         pre_prepare: SignedPrePrepare,
-        request: ClientRequest,
+        request: ProposeBlockMsg,
         sequence: u64,
     ) -> Result<SignedPrepare> {
         if pre_prepare.metadata.digest != request.digest() {

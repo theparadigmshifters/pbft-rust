@@ -1,7 +1,7 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap};
 
 use crate::{
-    AcceptedRequest, ClientRequest, ClientRequestId, MessageDigest,
+    AcceptedRequest, ProposeBlockMsg, MessageDigest,
     NULL_DIGEST,
 };
 type MessageLog = BTreeMap<u64, StoredMessage>;
@@ -29,22 +29,16 @@ impl StoredMessage {
 
 pub struct MessageStore {
     message_log: MessageLog,
-
-    // by_request_id is used to check if a request has already been processed.
-    // It references the ClientRequest in message_log.
-    by_request_id: HashMap<ClientRequestId, u64>,
 }
 
 impl MessageStore {
     pub fn new() -> Self {
         Self {
             message_log: BTreeMap::new(),
-            by_request_id: HashMap::new(),
         }
     }
 
-    pub fn insert_client_request(&mut self, sequence: u64, request: ClientRequest) {
-        let req_id = request.request_id.clone();
+    pub fn insert_client_request(&mut self, sequence: u64, request: ProposeBlockMsg) {
         self.inner_insert(
             sequence,
             StoredMessage::AcceptedRequest(AcceptedRequest {
@@ -53,7 +47,6 @@ impl MessageStore {
                 result: false,
             }),
         );
-        self.by_request_id.insert(req_id, sequence); // Store the sequence instead of reference
     }
 
     pub fn insert_null(&mut self, sequence: u64) {
@@ -79,19 +72,5 @@ impl MessageStore {
 
     pub fn has_message(&self, seq: u64) -> bool {
         self.message_log.contains_key(&seq)
-    }
-
-    pub fn get_by_id(&self, request_id: &ClientRequestId) -> Option<&AcceptedRequest> {
-        if let Some(&sequence) = self.by_request_id.get(request_id) {
-            self.message_log.get(&sequence).and_then(|r| {
-                if let StoredMessage::AcceptedRequest(req) = r {
-                    Some(req)
-                } else {
-                    None
-                }
-            })
-        } else {
-            None
-        }
     }
 }

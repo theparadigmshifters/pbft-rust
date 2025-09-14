@@ -1,13 +1,13 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{pbft_state::ReplicaState, ClientRequest, ProtocolMessage, SignedPrePrepare};
+use crate::{pbft_state::ReplicaState, ProposeBlockMsg, ProtocolMessage, SignedPrePrepare};
 
 pub const REPLICA_ID_HEADER: &str = "pbft-replica-id";
 pub const REPLICA_SIGNATURE_HEADER: &str = "pbft-signature-id";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ClientRequestBroadcast {
-    pub request: ClientRequest,
+pub struct ProposeBlockMsgBroadcast {
+    pub request: ProposeBlockMsg,
     pub sequence_number: u64,
     pub pre_prepare: SignedPrePrepare,
 }

@@ -1,20 +1,14 @@
 use std::sync::{Arc};
 use crypto::{PublicKey, Signature};
-use tracing::{debug, info};
+use tracing::{info, error};
 
 use crate::{
-    api::ClientRequestBroadcast,
-    broadcast::Broadcaster,
-    config::NodeId,
-    pbft_executor::quorum_size,
-    pbft_executor::{self, PbftExecutor},
-    ClientRequest, OperationAck, OperationStatus, ProtocolMessage,
+    api::ProposeBlockMsgBroadcast, broadcast::Broadcaster, config::NodeId, pbft_executor::{quorum_size, PbftExecutor}, ProtocolMessage
 };
 
 pub struct Pbft {
     nodes_config: crate::config::PbftNodeConfig,
     pbft_executor: PbftExecutor,
-    broadcaster: Arc<Broadcaster>,
 }
 
 impl Pbft {
@@ -33,7 +27,6 @@ impl Pbft {
 
         Ok(Self {
             pbft_executor,
-            broadcaster,
             nodes_config: config.node_config,
         })
     }
@@ -43,6 +36,8 @@ impl Pbft {
         executor_rx_cancel: tokio::sync::broadcast::Receiver<()>,
         backup_rx_cancel: tokio::sync::broadcast::Receiver<()>,
     ) {
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(1));
+
         tokio::select! {
             _ = self.pbft_executor.run(executor_rx_cancel) => {
                 info!("pbft executor loop exited");
@@ -50,6 +45,14 @@ impl Pbft {
             _ = self.pbft_executor.run_backup_queue_watcher(backup_rx_cancel) => {
                 info!("pbft backup queue watcher exited");
             }
+            _ = async {
+            loop {
+                interval.tick().await;
+                if let Err(e) = self.pbft_executor.propose_block() {
+                    error!("Failed to propose block: {}", e);
+                }
+            }
+            } => {}
         }
     }
 
@@ -57,54 +60,10 @@ impl Pbft {
         quorum_size(self.nodes_config.nodes.len())
     }
 
-    pub async fn handle_client_request(
-        &self,
-        request: ClientRequest,
-    ) -> Result<OperationAck, crate::error::Error> {
-        match self.pbft_executor.handle_client_request(request.clone())? {
-            crate::pbft_executor::ClientRequestResult::NotLeader(pbft_executor::NotLeader {
-                leader_id,
-            }) => {
-                debug!(
-                    leader_id = leader_id.0,
-                    "forwarding client request to leader"
-                );
-                // We forward the request here instead of an executor since we
-                // are awaiting the async operation.
-                let ack = self
-                    .broadcaster
-                    .forward_to_node(request, leader_id)
-                    .await
-                    .map_err(crate::error::Error::broadcast_error(
-                        "failed to forward client request to leader",
-                    ))?;
-                Ok(ack)
-            }
-            crate::pbft_executor::ClientRequestResult::AlreadyAccepted(handled_req) => {
-                let ack = OperationAck {
-                    client_request: handled_req.request.request,
-                    leader_id: handled_req.leader_id,
-                    sequence_number: handled_req.request.sequence,
-                    status: OperationStatus::AlreadyHandled(handled_req.request.result),
-                };
-                Ok(ack)
-            }
-            crate::pbft_executor::ClientRequestResult::Accepted(sequence) => {
-                let op_ack = OperationAck {
-                    client_request: request.clone(),
-                    leader_id: self.nodes_config.self_id.0,
-                    sequence_number: sequence,
-                    status: OperationStatus::Accepted,
-                };
-                Ok(op_ack)
-            }
-        }
-    }
-
-    pub fn handle_client_request_broadcast(
+    pub fn handle_propose_block_broadcast(
         &self,
         sender_id: u64,
-        message: ClientRequestBroadcast,
+        message: ProposeBlockMsgBroadcast,
     ) -> Result<(), crate::error::Error> {
         self.pbft_executor
             .queue_request_broadcast(sender_id, message);

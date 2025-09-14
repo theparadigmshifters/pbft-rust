@@ -5,11 +5,10 @@ use tracing::{debug, error};
 
 use crate::{
     api::{
-        ClientRequestBroadcast, ProtocolMessageBroadcast, REPLICA_ID_HEADER,
+        ProposeBlockMsgBroadcast, ProtocolMessageBroadcast, REPLICA_ID_HEADER,
         REPLICA_SIGNATURE_HEADER,
     },
-    config::{NodeConfig, NodeId, Secret},
-    ClientRequest, OperationAck,
+    config::{NodeConfig, NodeId, Secret}
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -59,7 +58,7 @@ impl BroadcastError {
 
 pub trait PbftBroadcaster: Send + Sync {
     fn broadcast_consensus_message(&self, msg: ProtocolMessageBroadcast);
-    fn broadcast_operation(&self, msg: ClientRequestBroadcast);
+    fn broadcast_operation(&self, msg: ProposeBlockMsgBroadcast);
 }
 
 type Result<T> = std::result::Result<T, BroadcastError>;
@@ -84,38 +83,6 @@ impl Broadcaster {
             keypair,
 
             client: reqwest::Client::new(),
-        }
-    }
-
-    pub async fn forward_to_node(
-        &self,
-        request: ClientRequest,
-        node_id: NodeId,
-    ) -> Result<OperationAck> {
-        let node = &self.nodes[node_id.0 as usize];
-
-        let url = format!("{}/api/v1/consensus/operation", node.addr);
-        let resp = self
-            .client
-            .post(&url)
-            .json(&request)
-            .send()
-            .await
-            .map_err(BroadcastError::send_error(url.clone()))?;
-
-        if resp.status().is_success() {
-            let ack = resp
-                .json::<OperationAck>()
-                .await
-                .map_err(BroadcastError::response_error(
-                    "failed to parse JSON response when forwarding client request",
-                ))?;
-            Ok(ack)
-        } else {
-            Err(BroadcastError::UnexpectedStatusError {
-                url,
-                status_code: resp.status(),
-            })
         }
     }
 
@@ -250,7 +217,7 @@ impl PbftBroadcaster for Broadcaster {
         )
     }
 
-    fn broadcast_operation(&self, msg: ClientRequestBroadcast) {
+    fn broadcast_operation(&self, msg: ProposeBlockMsgBroadcast) {
         self.broadcast(
             msg,
             "api/v1/pbft/execute",

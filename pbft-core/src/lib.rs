@@ -22,8 +22,8 @@ pub mod dev;
 pub type Result<T> = std::result::Result<T, error::Error>;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq, Default)]
-pub struct Operation {
-   pub block: Vec<u8>
+pub struct Block {
+   pub payload: Vec<u8>
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
@@ -48,12 +48,11 @@ impl std::fmt::Display for ClientRequestId {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
-pub struct ClientRequest {
-    pub request_id: ClientRequestId,
-    pub operation: Operation,
+pub struct ProposeBlockMsg {
+    pub block: Block,
 }
 
-impl ClientRequest {
+impl ProposeBlockMsg {
     pub fn digest(&self) -> MessageDigest {
         let serialized = serde_json::to_string(&self).unwrap();
         let digest = md5::compute(serialized);
@@ -64,13 +63,13 @@ impl ClientRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
 pub struct AcceptedRequest {
     pub sequence: u64,
-    pub request: ClientRequest,
+    pub request: ProposeBlockMsg,
     pub result: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OperationAck {
-    pub client_request: ClientRequest,
+    pub client_request: ProposeBlockMsg,
     pub leader_id: u64,
     pub sequence_number: u64,
     pub status: OperationStatus,
