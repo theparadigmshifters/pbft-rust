@@ -1,5 +1,6 @@
 /.idea
 /.vscode
 /target
+node/logs
 
 .overmind.sock

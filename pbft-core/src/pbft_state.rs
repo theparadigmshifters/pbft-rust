@@ -142,7 +142,7 @@ impl RequestConsensusState {
     }
 
     pub fn is_prepared(&self, replicas_count: usize) -> bool {
-        self.prepare.len() > quorum_size(replicas_count) && self.pre_prepare.is_some()
+        self.prepare.len() >= quorum_size(replicas_count) && self.pre_prepare.is_some()
     }
 
     pub fn is_committed_local(&self, replicas_count: usize) -> bool {
