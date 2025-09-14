@@ -27,7 +27,7 @@ pub async fn start(
             .await
     });
 
-    let mut api_server = api::ApiServer::new(config.clone(), pbft_module, kv_store).await;
+    let mut api_server = api::ApiServer::new(config.clone(), pbft_module).await;
     info!("starting api server...");
     let api_handle = tokio::spawn(async move { api_server.run(inner_rx_cancel).await });
 

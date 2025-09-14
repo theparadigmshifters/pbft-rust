@@ -1,7 +1,6 @@
 mod api;
 mod config;
 mod dev;
-mod kv;
 pub(crate) mod node;
 
 #[tokio::main]

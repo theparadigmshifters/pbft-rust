@@ -1,14 +1,14 @@
 use std::{
     collections::{HashMap, HashSet},
     net::SocketAddr,
-    sync::{Arc, Mutex, RwLock},
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
 use axum::{
     async_trait,
     body::Body,
-    extract::{FromRequest, Query},
+    extract::{FromRequest},
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::{get, post},
@@ -23,8 +23,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tracing::{debug, error, info};
 
 use crate::{
-    config::AppConfig,
-    kv::{KeyRequest, Value},
+    config::AppConfig
 };
 
 pub const REQUEST_ID_HEADER: &str = "request-id";
@@ -54,9 +53,6 @@ pub struct ApiServer {
 
 pub struct APIContext {
     pbft_module: Arc<pbft_core::Pbft>,
-
-    kv_store: Arc<RwLock<pbft_core::state_machine::InMemoryKVStore>>,
-
     client: reqwest::Client,
     pbft_leader_url: Mutex<String>,
     nodes_urls: HashMap<u64, String>,
@@ -88,13 +84,11 @@ impl ApiServer {
     pub async fn new(
         config: AppConfig,
         pbft_module: Arc<pbft_core::Pbft>,
-        kv_store: Arc<RwLock<pbft_core::state_machine::InMemoryKVStore>>,
     ) -> Self {
         let addr = SocketAddr::from((config.listen_addr, config.port));
 
         let api_context = Arc::new(APIContext {
             pbft_module,
-            kv_store,
             client: reqwest::Client::new(),
             pbft_leader_url: Mutex::new(config.node_url()),
             nodes_urls: config
@@ -116,9 +110,7 @@ impl ApiServer {
 
     pub async fn run(&mut self, mut rx_shutdown: tokio::sync::broadcast::Receiver<()>) {
         let kv_router = Router::new()
-            .route("/", post(handle_kv_set))
-            .route("/", get(handle_kv_get))
-            .route("/local", get(handle_kv_get_local));
+            .route("/", post(handle_kv_set));
 
         // KV Nodes receives responses from pBFT replicas here
         let consensus_client_router =
@@ -435,30 +427,6 @@ async fn broadcast_request_to_all(
     }
 
     Err(Error::FailedToBroadcast)
-}
-
-async fn handle_kv_get(
-    ctx: axum::extract::State<HandlerContext>,
-    headers: HeaderMap,
-    Query(key_request): Query<KeyRequest>,
-) -> impl axum::response::IntoResponse {
-    let operation = pbft_core::Operation::Get {
-        key: key_request.key,
-    };
-
-    handle_kv_operation(ctx, headers, operation).await
-}
-
-async fn handle_kv_get_local(
-    ctx: axum::extract::State<HandlerContext>,
-    Query(key_request): Query<KeyRequest>,
-) -> impl axum::response::IntoResponse {
-    let val = ctx.kv_store.read().unwrap().get(&key_request.key);
-
-    Json(Value {
-        key: key_request.key,
-        value: val,
-    })
 }
 
 // Consensus client router handlers
