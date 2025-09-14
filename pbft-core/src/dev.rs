@@ -47,12 +47,6 @@ pub fn dev_config(self_id: NodeId, start_port: u16) -> Config {
             ],
         },
         checkpoint_frequency: 10,
-        response_urls: vec![
-            format!("http://localhost:{}/api/v1/client/response", start_port),
-            format!("http://localhost:{}/api/v1/client/response", start_port + 1),
-            format!("http://localhost:{}/api/v1/client/response", start_port + 2),
-            format!("http://localhost:{}/api/v1/client/response", start_port + 3),
-        ],
         executor_config: ExecutorConfig {
             max_requeue_attempts_on_failure: 5,
         },

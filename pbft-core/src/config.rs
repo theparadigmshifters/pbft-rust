@@ -16,7 +16,6 @@ pub struct Config {
     pub checkpoint_frequency: u64,
     #[serde(default = "default_view_change_timeout")]
     pub view_change_timeout: Duration,
-    pub response_urls: Vec<String>,
     pub executor_config: ExecutorConfig,
 }
 

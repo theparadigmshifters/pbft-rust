@@ -29,7 +29,6 @@ impl Pbft {
             config.node_config.self_id,
             config.node_config.nodes.clone(),
             keypair.clone(),
-            config.response_urls.clone(),
         ));
         let pbft_executor =
             PbftExecutor::new(config.clone(), keypair, state_machine, broadcaster.clone());

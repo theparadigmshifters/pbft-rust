@@ -9,7 +9,7 @@ use crate::{
         REPLICA_SIGNATURE_HEADER,
     },
     config::{NodeConfig, NodeId, Secret},
-    ClientRequest, ClientResponse, OperationAck,
+    ClientRequest, OperationAck,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -60,7 +60,6 @@ impl BroadcastError {
 pub trait PbftBroadcaster: Send + Sync {
     fn broadcast_consensus_message(&self, msg: ProtocolMessageBroadcast);
     fn broadcast_operation(&self, msg: ClientRequestBroadcast);
-    fn send_client_responses(&self, responses: Vec<ClientResponse>);
 }
 
 type Result<T> = std::result::Result<T, BroadcastError>;
@@ -68,7 +67,6 @@ type Result<T> = std::result::Result<T, BroadcastError>;
 pub struct Broadcaster {
     node_self_id: NodeId,
     nodes: Vec<NodeConfig>,
-    response_urls: Vec<String>,
     keypair: Arc<Secret>,
 
     client: reqwest::Client,
@@ -79,13 +77,11 @@ impl Broadcaster {
         node_id: NodeId,
         nodes: Vec<NodeConfig>,
         keypair: Arc<Secret>,
-        response_urls: Vec<String>,
     ) -> Self {
         Self {
             node_self_id: node_id,
             nodes,
             keypair,
-            response_urls,
 
             client: reqwest::Client::new(),
         }
@@ -241,35 +237,6 @@ impl Broadcaster {
 }
 
 impl PbftBroadcaster for Broadcaster {
-    fn send_client_responses(&self, responses: Vec<ClientResponse>) {
-        let mut futs = FuturesUnordered::new();
-        for resp in responses {
-            for url in &self.response_urls {
-                let client = self.client.clone();
-                let self_id = self.node_self_id;
-                let keypair = self.keypair.clone();
-                let resp = resp.clone();
-                let url = url.clone();
-
-                futs.push(Box::pin(async move {
-                    Broadcaster::send_with_retires(client, self_id, &keypair, &resp, url.as_str())
-                        .await
-                }));
-            }
-        }
-
-        tokio::spawn(async move {
-            while let Some(out) = futs.next().await {
-                match out {
-                    Ok(_) => {}
-                    Err(err) => {
-                        error!(error = ?err, "failed to send response to client in all attempts");
-                    }
-                }
-            }
-        });
-    }
-
     fn broadcast_consensus_message(&self, msg: ProtocolMessageBroadcast) {
         self.broadcast(
             msg,

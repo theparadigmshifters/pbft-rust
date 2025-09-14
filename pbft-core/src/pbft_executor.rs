@@ -466,7 +466,7 @@ impl PbftExecutor {
         attempt: u32,
     ) {
         match self.process_protocol_message(protocol_message.clone(), sender_id) {
-            Ok((p_messages, responses)) => {
+            Ok(p_messages) => {
                 for p_msg in p_messages.iter() {
                     // Do not queue NewView message for yourself to process
                     if !p_msg.is_new_view() {
@@ -477,10 +477,6 @@ impl PbftExecutor {
 
                     self.broadcaster
                         .broadcast_consensus_message(ProtocolMessageBroadcast::new(p_msg.clone()));
-                }
-
-                if !responses.is_empty() {
-                    self.broadcaster.send_client_responses(responses);
                 }
             }
             Err(err) => {
@@ -515,7 +511,7 @@ impl PbftExecutor {
         &self,
         message: ProtocolMessage,
         sender_id: NodeId,
-    ) -> Result<(Vec<ProtocolMessage>, Vec<ClientResponse>)> {
+    ) -> Result<Vec<ProtocolMessage>> {
         if let Some(replica_id) = message.replica_id() {
             if sender_id != replica_id {
                 return Err(Error::InvalidReplicaID { replica_id });
@@ -539,12 +535,12 @@ impl PbftExecutor {
                     .process_prepare(&mut state, prepare)?
                     .map(|cm| vec![cm])
                     .unwrap_or_default();
-                Ok((cm, vec![]))
+                Ok(cm)
             }
             ProtocolMessage::Commit(commit) => self.process_commit(&mut state, commit),
             ProtocolMessage::Checkpoint(checkpoint) => {
                 self.process_checkpoint_message(&mut state, checkpoint);
-                Ok((vec![], vec![]))
+                Ok(vec![])
             }
             ProtocolMessage::ViewChange(view_change) => {
                 self.process_view_change_message(&mut state, view_change)
@@ -731,7 +727,7 @@ impl PbftExecutor {
         &self,
         state: &mut PbftState,
         commit: SignedCommit,
-    ) -> Result<(Vec<ProtocolMessage>, Vec<ClientResponse>)> {
+    ) -> Result<Vec<ProtocolMessage>> {
         // verify signature
         let ok = commit.verify()?;
         if !ok {
@@ -774,16 +770,13 @@ impl PbftExecutor {
             if !entry.reported_committed_local {
                 entry.reported_committed_local = true;
                 // We will try to apply all messages that we can
-                let (checkpoints, responses) = self.apply_messages(state)?;
-                (
-                    checkpoints.into_iter().map(|m| m.into()).collect(),
-                    responses,
-                )
+                let checkpoints = self.apply_messages(state)?;
+                checkpoints.into_iter().map(|m| m.into()).collect()
             } else {
-                (vec![], vec![])
+                vec![]
             }
         } else {
-            (vec![], vec![])
+            vec![]
         };
 
         Ok(result)
@@ -793,7 +786,7 @@ impl PbftExecutor {
     fn apply_messages(
         &self,
         state: &mut PbftState,
-    ) -> Result<(Vec<SignedCheckpoint>, Vec<ClientResponse>)> {
+    ) -> Result<Vec<SignedCheckpoint>> {
         // Start from state.last_applied
         let last_applied = &mut state.last_applied_seq;
 
@@ -804,7 +797,7 @@ impl PbftExecutor {
             .iter()
             .position(|(idx, _)| idx.sequence > *last_applied);
         if start.is_none() {
-            return Ok((vec![], vec![]));
+            return Ok(vec![]);
         }
 
         debug!(
@@ -885,7 +878,7 @@ impl PbftExecutor {
                     // If we cannot apply the operation because we are missing the request,
                     // we stop applying messages
                     // TODO: we could queue some request to other replicas to fetch messages here
-                    return Ok((checkpoints, responses));
+                    return Ok(checkpoints);
                 }
             };
 
@@ -909,7 +902,7 @@ impl PbftExecutor {
                 )
             }
         }
-        Ok((checkpoints, responses))
+        Ok(checkpoints)
     }
 
     fn reset_timer(&self, timer: &mut Option<ViewChangeTimer>) {
@@ -1028,7 +1021,7 @@ impl PbftExecutor {
         &self,
         state: &mut PbftState,
         view_change: SignedViewChange,
-    ) -> Result<(Vec<ProtocolMessage>, Vec<ClientResponse>)> {
+    ) -> Result<Vec<ProtocolMessage>> {
         let log = &mut state.view_change_log;
 
         if state.view >= view_change.view {
@@ -1037,7 +1030,7 @@ impl PbftExecutor {
                 replica_view = state.view,
                 "ignoring view change message for lower or equal view"
             );
-            return Ok((vec![], vec![]));
+            return Ok(vec![]);
         }
         self.verify_view_change(&view_change)?;
 
@@ -1082,24 +1075,24 @@ impl PbftExecutor {
 
                 cm_messages.push(ProtocolMessage::NewView(new_view));
 
-                return Ok((cm_messages, vec![]));
+                return Ok(cm_messages);
             }
         }
 
-        Ok((vec![], vec![]))
+        Ok(vec![])
     }
 
     fn process_new_view_message(
         &self,
         state: &mut PbftState,
         new_view: SignedNewView,
-    ) -> Result<(Vec<ProtocolMessage>, Vec<ClientResponse>)> {
+    ) -> Result<Vec<ProtocolMessage>> {
         self.verify_new_view(&new_view)?;
 
         info!(view = new_view.view, "received new view message");
         let prepares = self.transition_view(state, ReplicaState::Replica, &new_view)?;
 
-        Ok((prepares, vec![]))
+        Ok(prepares)
     }
 
     fn compose_new_view_message(
