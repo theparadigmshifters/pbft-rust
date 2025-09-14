@@ -173,6 +173,5 @@ impl CheckpointConsensusState {
 }
 
 pub struct ViewChangeTimer {
-    pub trigger_digest: MessageDigest,
     pub task: tokio::task::JoinHandle<()>,
 }

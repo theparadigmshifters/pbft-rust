@@ -9,14 +9,14 @@ use crate::{
     api::{ProposeBlockMsgBroadcast, ProtocolMessageBroadcast}, broadcast::PbftBroadcaster, config::{NodeId, Secret}, error::Error, pbft_state::{
         CheckpointConsensusState, ConsensusLogIdx, PbftState, ReplicaState, RequestConsensusState,
         ViewChangeTimer,
-    }, Block, Checkpoint, Commit, Config, MessageDigest, MessageMeta, NewView, PrePrepare, Prepare, PreparedProof, ProposeBlockMsg, ProtocolMessage, Result, SignMessage, SignedCheckpoint, SignedCommit, SignedNewView, SignedPrePrepare, SignedPrepare, SignedViewChange, ViewChange, ViewChangeCheckpoint, NULL_DIGEST
+    }, Block, Checkpoint, Commit, Config, MessageMeta, NewView, PrePrepare, Prepare, PreparedProof, ProposeBlockMsg, ProtocolMessage, Result, SignMessage, SignedCheckpoint, SignedCommit, SignedNewView, SignedPrePrepare, SignedPrepare, SignedViewChange, ViewChange, ViewChangeCheckpoint, NULL_DIGEST
 };
 
 #[derive(Debug, Clone)]
 pub enum Event {
     ProposeBlockBroadcast(NodeId, ProposeBlockMsgBroadcast),
     ProtocolMessage(NodeId, ProtocolMessage),
-    ViewChangeTimerExpired(MessageDigest),
+    ViewChangeTimerExpired(),
 }
 
 impl Event {
@@ -31,7 +31,7 @@ impl Event {
                 sender.0,
                 cm.message_type_str()
             ),
-            Event::ViewChangeTimerExpired(digest) => format!("ViewChangeTimerExpired: {}", digest),
+            Event::ViewChangeTimerExpired() => format!("ViewChangeTimerExpired"),
         }
     }
 }
@@ -101,25 +101,25 @@ impl PbftExecutor {
     }
 
     pub fn propose_block(&self) -> Result<()> {
-        let request = ProposeBlockMsg{block: Block { payload: "test".as_bytes().to_vec() }};
-        let digest = request.digest();
-        info!(digest = digest.to_string(), "handling client request");
-
         let mut state = self.pbft_state.lock().unwrap();
 
         match state.replica_state {
             ReplicaState::Replica | ReplicaState::ViewChange => {
                 debug!(
-                    digest = digest.to_string(),
-                    "received client request on non-leader replica, starting view change timer"
+                    "non-leader replica, starting view change timer"
                 );
                 // Start view change timer, if not already started
                 if state.timer.is_none() {
-                    self.start_view_change_timer(&mut state, digest.clone());
+                    self.start_view_change_timer(&mut state);
                 }
                 Ok(())
             }
             ReplicaState::Leader { sequence } => {
+                // get proposal mock
+                let request = ProposeBlockMsg{block: Block { payload: "test".as_bytes().to_vec() }};
+                let digest = request.digest();
+                info!(digest = digest.to_string(), "handling block propose");
+
                 let message_sequence = sequence + 1;
                 state.replica_state = ReplicaState::Leader {
                     sequence: message_sequence,
@@ -168,14 +168,13 @@ impl PbftExecutor {
         }
     }
 
-    fn start_view_change_timer(&self, state: &mut PbftState, digest: MessageDigest) {
+    fn start_view_change_timer(&self, state: &mut PbftState) {
         let tx = self.event_tx.clone();
-        let digest_m = digest.clone();
         let vc_timoeut = self.config.view_change_timeout;
         let timer_task = tokio::spawn(async move {
             tokio::time::sleep(vc_timoeut).await;
             match tx
-                .send(Event::ViewChangeTimerExpired(digest_m).into())
+                .send(Event::ViewChangeTimerExpired().into())
                 .await
             {
                 Ok(_) => {}
@@ -187,7 +186,6 @@ impl PbftExecutor {
             }
         });
         state.timer = Some(ViewChangeTimer {
-            trigger_digest: digest,
             task: timer_task,
         });
     }
@@ -273,8 +271,8 @@ impl PbftExecutor {
                         Event::ProtocolMessage(sender_id, consensus_message) => {
                             self.protocol_message_event(sender_id, consensus_message, event_occ.attempt)
                         }
-                        Event::ViewChangeTimerExpired(message_digest) => {
-                            self.view_change_timer_event(message_digest);
+                        Event::ViewChangeTimerExpired() => {
+                            self.view_change_timer_event();
                         }
                     };
                 }
@@ -319,7 +317,7 @@ impl PbftExecutor {
         }
     }
 
-    fn view_change_timer_event(&self, digest: MessageDigest) {
+    fn view_change_timer_event(&self) {
         let mut state = self.pbft_state.lock().unwrap();
 
         if state.timer.is_none() {
@@ -329,29 +327,27 @@ impl PbftExecutor {
             return;
         }
 
-        let timer = state.timer.take().unwrap();
-        if digest != timer.trigger_digest {
-            warn!("received view change trigger for different digest than expected");
-            // cleanup
-            state.timer = Some(timer);
-            return;
-        }
-
         // Make sure we cleanup the timer, however it should not be
         // necessary.
         self.reset_timer(&mut state.timer);
 
         info!(
-            digest = timer.trigger_digest.to_string(),
             "message was not applied in time, starting view change",
         );
 
         match self.initiate_view_change(&mut state) {
-            Ok(vc) => self
+            Ok(vc) => {
+               let event =
+                    Event::ProtocolMessage(self.config.node_config.self_id, ProtocolMessage::ViewChange(vc.clone()));
+                self.queue_event(event.into());
+
+                // broadcast view change
+                self
                 .broadcaster
                 .broadcast_consensus_message(ProtocolMessageBroadcast {
                     message: ProtocolMessage::ViewChange(vc),
-                }),
+                })
+            }
             Err(e) => {
                 error!(error=?e, "failed to initiate view change, reverting to replica state");
                 state.replica_state = ReplicaState::Replica;
@@ -366,11 +362,12 @@ impl PbftExecutor {
     ) {
         match self.handle_request_broadcast(sender_id, client_request_broadcast) {
             Ok(prepare) => {
-                let prepare_cm = ProtocolMessage::Prepare(prepare);
+                let prepare_cm = ProtocolMessage::Prepare(prepare.clone());
                 let event =
                     Event::ProtocolMessage(self.config.node_config.self_id, prepare_cm.clone());
                 self.queue_event(event.into());
 
+                // broadcast prepare
                 self.broadcaster
                     .broadcast_consensus_message(ProtocolMessageBroadcast::new(prepare_cm));
             }
@@ -788,16 +785,13 @@ impl PbftExecutor {
                     assert!(*last_applied == idx.sequence);
 
                     // Stop View Change timer if this message started it
-                    if let Some(timer) = &state.timer {
+                    if let Some(_) = &state.timer {
                         // The message that started the timer was applied,
                         // so we can stop the timer.
-                        if timer.trigger_digest == store_msg.digest() {
-                            info!(
-                                    digest = general_purpose::STANDARD.encode(timer.trigger_digest.0),
-                                    "message that started view change timer was applied, stopping timer",
-                                );
-                            self.reset_timer(&mut state.timer);
-                        }
+                        info!(
+                                "message that started view change timer was applied, stopping timer",
+                            );
+                        self.reset_timer(&mut state.timer);
                     }
                     let applied = true;
                     store_msg.set_opreation_result(applied);
@@ -940,8 +934,9 @@ impl PbftExecutor {
         state: &mut PbftState,
         view_change: SignedViewChange,
     ) -> Result<Vec<ProtocolMessage>> {
-        let log = &mut state.view_change_log;
+        info!(view = view_change.view, "start process view change message");
 
+        let log = &mut state.view_change_log;
         if state.view >= view_change.view {
             warn!(
                 view = view_change.view,
@@ -956,7 +951,7 @@ impl PbftExecutor {
 
         // If we already have ViewChange message from this replica, we do not add it again.
         if !entry.iter().any(|m| m.replica_id == view_change.replica_id) {
-            debug!(
+            info!(
                 replica_id = view_change.replica_id.0,
                 view = view_change.view,
                 "storing view change message",
@@ -970,6 +965,7 @@ impl PbftExecutor {
         if view_leader(self.config.node_config.nodes.len() as u64, view_change.view)
             == self.config.node_config.self_id.0
         {
+            info!(x = entry.len(), "collect x view change message");
             if entry.len() >= quorum_size(self.config.node_config.nodes.len()) {
                 info!(
                     view = view_change.view,
