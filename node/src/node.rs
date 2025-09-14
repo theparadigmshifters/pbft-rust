@@ -1,5 +1,5 @@
 use std::{
-    sync::{Arc, RwLock},
+    sync::{Arc},
     vec,
 };
 use tracing::{debug, info};
@@ -9,12 +9,9 @@ pub async fn start(
     config: AppConfig,
     mut rx_cancel: tokio::sync::broadcast::Receiver<()>,
 ) -> Result<(), pbft_core::error::Error> {
-    let kv_store = pbft_core::InMemoryKVStore::new();
-    let kv_store = Arc::new(RwLock::new(kv_store));
-
     let (inner_tx_cancel, inner_rx_cancel) = tokio::sync::broadcast::channel(10);
 
-    let pbft_module = pbft_core::Pbft::new(config.pbft_config.clone(), kv_store.clone())?;
+    let pbft_module = pbft_core::Pbft::new(config.pbft_config.clone())?;
     let pbft_module = Arc::new(pbft_module);
 
     let pbft_module_m = pbft_module.clone();

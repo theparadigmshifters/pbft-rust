@@ -12,50 +12,18 @@ pub(crate) mod message_store;
 pub mod pbft;
 pub mod pbft_executor;
 pub(crate) mod pbft_state;
-pub mod state_machine;
 pub use crate::config::Config;
 pub use pbft::Pbft;
 pub use pbft_state::ReplicaState;
-pub use state_machine::InMemoryKVStore;
 pub const NULL_DIGEST: MessageDigest = MessageDigest([0; 16]);
 
 pub mod dev;
 
 pub type Result<T> = std::result::Result<T, error::Error>;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
-pub enum Operation {
-    Noop, // Used by the protocol for NULL messages
-    Set { key: String, value: String },
-    Get { key: String },
-}
-
-impl Operation {
-    pub fn matches_result(&self, result: &OperationResult) -> bool {
-        match (self, result) {
-            (Operation::Noop, OperationResult::Noop) => true,
-            (Operation::Set { key, value }, OperationResult::Set { key: k, value: v }) => {
-                key == k && value == v
-            }
-            (Operation::Get { key }, OperationResult::Get { key: k, value: _ }) => key == k,
-            _ => false,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub enum OperationResult {
-    Set { key: String, value: String },
-    Get { key: String, value: Option<String> },
-    Noop,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub struct OperationResultSequenced {
-    pub result: OperationResult,
-    /// Sequence number of the operation assigned by the pbft leader when
-    /// initially accepting the operation
-    pub sequence_number: u64,
+#[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq, Default)]
+pub struct Operation {
+   pub block: Vec<u8>
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
@@ -97,7 +65,7 @@ impl ClientRequest {
 pub struct AcceptedRequest {
     pub sequence: u64,
     pub request: ClientRequest,
-    pub result: Option<OperationResult>,
+    pub result: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -111,13 +79,7 @@ pub struct OperationAck {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum OperationStatus {
     Accepted,
-    AlreadyHandled(Option<OperationResult>),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ClientResponse {
-    pub request: ClientRequest,
-    pub result: OperationResultSequenced,
+    AlreadyHandled(bool),
 }
 
 pub trait ReplicaId {
@@ -323,7 +285,6 @@ impl std::fmt::Display for CheckpointDigest {
 pub struct Checkpoint {
     pub replica_id: NodeId,
     pub sequence: u64,
-    pub digest: CheckpointDigest,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -345,7 +306,6 @@ pub struct ViewChange {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ViewChangeCheckpoint {
     pub sequence: u64,
-    pub digest: CheckpointDigest,
     // Map public key to signed checkpoint message by the given replica.
     pub checkpoint_proofs: HashMap<String, SignedCheckpoint>,
 }

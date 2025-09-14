@@ -1,12 +1,9 @@
 use std::collections::{BTreeMap, HashMap};
 
 use crate::{
-    AcceptedRequest, ClientRequest, ClientRequestId, MessageDigest, Operation, OperationResult,
+    AcceptedRequest, ClientRequest, ClientRequestId, MessageDigest,
     NULL_DIGEST,
 };
-
-static NOOP_OPERATION: Operation = Operation::Noop;
-
 type MessageLog = BTreeMap<u64, StoredMessage>;
 
 pub enum StoredMessage {
@@ -22,16 +19,9 @@ impl StoredMessage {
         }
     }
 
-    pub fn operation(&self) -> &Operation {
+    pub fn set_opreation_result(&mut self, result: bool) {
         match self {
-            StoredMessage::AcceptedRequest(req) => &req.request.operation,
-            StoredMessage::Null { sequence: _ } => &NOOP_OPERATION,
-        }
-    }
-
-    pub fn set_opreation_result(&mut self, result: OperationResult) {
-        match self {
-            StoredMessage::AcceptedRequest(req) => req.result = Some(result),
+            StoredMessage::AcceptedRequest(req) => req.result = result,
             StoredMessage::Null { sequence: _ } => (),
         }
     }
@@ -60,7 +50,7 @@ impl MessageStore {
             StoredMessage::AcceptedRequest(AcceptedRequest {
                 sequence,
                 request,
-                result: None,
+                result: false,
             }),
         );
         self.by_request_id.insert(req_id, sequence); // Store the sequence instead of reference

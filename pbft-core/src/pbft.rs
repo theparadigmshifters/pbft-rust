@@ -1,4 +1,4 @@
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc};
 use crypto::{PublicKey, Signature};
 use tracing::{debug, info};
 
@@ -8,7 +8,6 @@ use crate::{
     config::NodeId,
     pbft_executor::quorum_size,
     pbft_executor::{self, PbftExecutor},
-    state_machine::StateMachie,
     ClientRequest, OperationAck, OperationStatus, ProtocolMessage,
 };
 
@@ -21,7 +20,6 @@ pub struct Pbft {
 impl Pbft {
     pub fn new(
         config: crate::Config,
-        state_machine: Arc<RwLock<dyn StateMachie>>,
     ) -> Result<Self, crate::error::Error> {
         let keypair = Arc::new(config.node_config.get_keypair());
 
@@ -31,7 +29,7 @@ impl Pbft {
             keypair.clone(),
         ));
         let pbft_executor =
-            PbftExecutor::new(config.clone(), keypair, state_machine, broadcaster.clone());
+            PbftExecutor::new(config.clone(), keypair, broadcaster.clone());
 
         Ok(Self {
             pbft_executor,

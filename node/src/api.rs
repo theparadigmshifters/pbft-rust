@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap},
     net::SocketAddr,
     sync::{Arc, Mutex},
     time::Duration,
@@ -14,10 +14,9 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use futures::{stream::FuturesUnordered, TryFutureExt};
+use futures::{stream::FuturesUnordered};
 use pbft_core::{
-    api::ClientRequestBroadcast, api::ProtocolMessageBroadcast, ClientRequest, ClientRequestId,
-    ClientResponse, OperationAck, OperationResultSequenced,
+    api::ClientRequestBroadcast, api::ProtocolMessageBroadcast, ClientRequest, ClientRequestId, OperationAck,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tracing::{debug, error, info};
@@ -56,13 +55,6 @@ pub struct APIContext {
     client: reqwest::Client,
     pbft_leader_url: Mutex<String>,
     nodes_urls: HashMap<u64, String>,
-
-    resp_channels: Mutex<HashMap<ClientRequestId, tokio::sync::broadcast::Sender<ClientResponse>>>,
-    /// replica_responses maps received operation result responses to the
-    /// replica IDs that send the specific response. Since we hash the whole
-    /// result together with sequence number, we ensure that not matching
-    /// responses for the same sequence are not counted together.
-    replica_responses: Mutex<HashMap<OperationResultSequenced, HashSet<u64>>>,
 }
 
 type HandlerContext = Arc<APIContext>;
@@ -98,8 +90,6 @@ impl ApiServer {
                 .iter()
                 .map(|node| (node.id.0, node.addr.clone()))
                 .collect(),
-            resp_channels: Mutex::new(HashMap::new()),
-            replica_responses: Mutex::new(HashMap::new()),
         });
 
         Self {
@@ -110,11 +100,7 @@ impl ApiServer {
 
     pub async fn run(&mut self, mut rx_shutdown: tokio::sync::broadcast::Receiver<()>) {
         let kv_router = Router::new()
-            .route("/", post(handle_kv_set));
-
-        // KV Nodes receives responses from pBFT replicas here
-        let consensus_client_router =
-            Router::new().route("/response", post(handle_client_consensus_response));
+            .route("/", post(handle_block));
 
         // TODO: Paths could probably be better...
         // KV Node translates the request to pBFT operation and sends it here
@@ -135,7 +121,6 @@ impl ApiServer {
         let app = Router::new()
             .route("/api/v1/health", get(health_handler))
             .nest("/api/v1/kv", kv_router)
-            .nest("/api/v1/client", consensus_client_router)
             .nest("/api/v1/consensus", consensus_ext_router)
             .nest("/api/v1/pbft", consensus_int_router)
             .with_state(self.ctx.clone());
@@ -214,33 +199,23 @@ async fn health_handler(_ctx: axum::extract::State<HandlerContext>) -> &'static 
 // KV router handlers
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct KvSetRequest {
-    pub key: String,
-    pub value: String,
+pub struct BlockRequest {
+    pub block: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct KvResponse {
-    pub request_id: ClientRequestId,
-    pub operation_sequence: u64,
-    pub key: String,
-    pub value: Option<String>,
-}
-
-async fn handle_kv_set(
+async fn handle_block(
     ctx: axum::extract::State<HandlerContext>,
     headers: HeaderMap,
-    Json(request): Json<KvSetRequest>,
+    Json(request): Json<BlockRequest>,
 ) -> impl axum::response::IntoResponse {
-    let operation = pbft_core::Operation::Set {
-        key: request.key,
-        value: request.value,
+    let operation = pbft_core::Operation {
+        block: request.block.as_bytes().to_vec()
     };
 
-    handle_kv_operation(ctx, headers, operation).await
+    handle_operation(ctx, headers, operation).await
 }
 
-async fn handle_kv_operation(
+async fn handle_operation(
     ctx: axum::extract::State<HandlerContext>,
     headers: HeaderMap,
     operation: pbft_core::Operation,
@@ -254,23 +229,12 @@ async fn handle_kv_operation(
         "handling kv operation",
     );
 
-    // Create channel and put tx part into shared memory. It is identified by
-    // combination of client id and client request sequence number.
-    let mut resp_rx = {
-        let mut channels = ctx.resp_channels.lock().unwrap();
-        let chan = channels.entry(request_id.clone()).or_insert({
-            let (tx, _) = tokio::sync::broadcast::channel(1000);
-            tx
-        });
-        chan.subscribe()
-    };
-
     // Send request to consensus layer
     let client_req = ClientRequest {
         request_id: request_id.clone(),
         operation: operation.clone(),
     };
-    let ack = match send_consensus_request(&ctx, &client_req).await {
+    let _ = match send_consensus_request(&ctx, &client_req).await {
         Ok(ack) => ack,
         Err(err) => {
             error!(error = ?err, "failed to send request to consensus layer");
@@ -281,80 +245,8 @@ async fn handle_kv_operation(
                 .into_response());
         }
     };
-    match ack.status {
-        pbft_core::OperationStatus::Accepted => {
-            debug!(
-                sequence = ack.sequence_number,
-                "request accepted by consensus layer"
-            );
-        }
-        pbft_core::OperationStatus::AlreadyHandled(res) => {
-            // If we already have the result, we can return it immediately
-            // otherwise we assume that we did not receive resoponses from
-            // replicas yet, hence we are going to wait for the channel.
-            if let Some(res) = res {
-                return result_to_response(request_id, ack.sequence_number, operation, res)
-                    .map_err(|e| e.into_response())
-                    .await;
-            }
-        }
-    }
-
-    tokio::select! {
-        resp = resp_rx.recv() => {
-            match resp {
-                Ok(resp) => {
-                    result_to_response(
-                        resp.request.request_id,
-                        resp.result.sequence_number,
-                        operation,
-                        resp.result.result,
-                    ).map_err(|e| e.into_response()).await
-                },
-                Err(err) => {
-                    error!(error = ?err, "failed to receive response");
-                    Err((StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response())
-                }
-            }
-        },
-        _ = tokio::time::sleep(std::time::Duration::from_secs(20)) => {
-            error!("timeout while waiting for response");
-            Err((StatusCode::GATEWAY_TIMEOUT, "timeout while waiting for request confirmation").into_response())
-        }
-    }
-}
-
-async fn result_to_response(
-    request_id: ClientRequestId,
-    sequence: u64,
-    operation: pbft_core::Operation,
-    result: pbft_core::OperationResult,
-) -> Result<Json<KvResponse>, (StatusCode, String)> {
-    if !operation.matches_result(&result) {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "operation does not match result - request ID might have been reused for different operation".to_string(),
-        ));
-    }
-
-    match result {
-        pbft_core::OperationResult::Set { key, value } => Ok(Json(KvResponse {
-            request_id,
-            operation_sequence: sequence,
-            key,
-            value: Some(value),
-        })),
-        pbft_core::OperationResult::Get { key, value } => Ok(Json(KvResponse {
-            request_id,
-            operation_sequence: sequence,
-            key,
-            value,
-        })),
-        pbft_core::OperationResult::Noop => Err((
-            StatusCode::BAD_REQUEST,
-            "requested result to noop operation".to_string(),
-        )),
-    }
+    
+    Ok((StatusCode::OK, "OK"))
 }
 
 async fn send_consensus_request(
@@ -429,58 +321,7 @@ async fn broadcast_request_to_all(
     Err(Error::FailedToBroadcast)
 }
 
-// Consensus client router handlers
-
-async fn handle_client_consensus_response(
-    ctx: axum::extract::State<HandlerContext>,
-    JsonAuthenticatedExt(client_response): JsonAuthenticatedExt<ClientResponse>,
-) -> Result<StatusCode, StatusCode> {
-    let replica_id = client_response.sender_id;
-    let client_response = client_response.data;
-    let req_id = client_response.request.request_id.clone();
-
-    let seq = client_response.result.sequence_number;
-
-    debug!(
-        sequence = seq,
-        sender_id = replica_id,
-        "received client response"
-    );
-
-    let mut replica_responses = ctx.replica_responses.lock().unwrap();
-    let replica_responses = replica_responses
-        .entry(client_response.result.clone())
-        .or_insert(HashSet::new());
-    replica_responses.insert(replica_id);
-
-    if replica_responses.len() >= ctx.pbft_module.quorum_size() {
-        let channels = ctx.resp_channels.lock().unwrap();
-        match channels.get(&req_id) {
-            Some(chan) => {
-                // TODO: This could potentially block if the channel is full
-                let _ = chan.send(client_response).map_err(|_| {
-                    debug!(
-                        sequence = seq,
-                        sender_id = replica_id,
-                        "failed to send response to channel, likely noone is listening",
-                    )
-                });
-            }
-            None => {
-                // Noone is waiting for this response
-                debug!(
-                    sequence = seq,
-                    sender_id = replica_id,
-                    "no channel found for client request key that we received response for",
-                );
-            }
-        }
-    }
-    Ok(StatusCode::OK)
-}
-
 // Consensus external router handlers
-
 async fn handle_consensus_operation_execute(
     ctx: axum::extract::State<HandlerContext>,
     Json(client_request): Json<ClientRequest>,

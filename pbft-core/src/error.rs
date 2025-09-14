@@ -82,9 +82,6 @@ pub enum Error {
     #[error("Invalid signature")]
     InvalidSignature,
 
-    #[error("State machine error: {0}")]
-    StateMachineError(#[from] crate::state_machine::Error),
-
     #[error("Invalid view change message: {0}")]
     InvalidViewChange(String),
 

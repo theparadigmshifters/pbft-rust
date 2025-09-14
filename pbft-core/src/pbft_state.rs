@@ -7,7 +7,7 @@ use crate::{
     config::NodeId,
     message_store::MessageStore,
     pbft_executor::{quorum_size, view_leader},
-    Checkpoint, CheckpointDigest, MessageDigest, MessageMeta, SignedCheckpoint, SignedCommit,
+    Checkpoint, MessageDigest, MessageMeta, SignedCheckpoint, SignedCommit,
     SignedPrePrepare, SignedPrepare, SignedViewChange,
 };
 
@@ -47,13 +47,6 @@ pub struct PbftState {
     pub(crate) view_change_log: ViewChangeLog,
 
     pub(crate) timer: Option<ViewChangeTimer>,
-
-    // We are going to store checkpoints in JSON format so that we can easily
-    // take digest of them. In a real system, they would also not live in memory
-    // but rather be stored on disk. Also for that reason we separate
-    // checkpoints and their digests.
-    pub(crate) checkpoints: BTreeMap<u64, String>,
-    pub(crate) checkpoint_digests: BTreeMap<u64, CheckpointDigest>,
 }
 
 impl PbftState {
@@ -81,9 +74,6 @@ impl PbftState {
             view_change_log: BTreeMap::new(),
 
             timer: None,
-
-            checkpoints: BTreeMap::new(),
-            checkpoint_digests: BTreeMap::new(),
         }
     }
 
@@ -161,24 +151,22 @@ impl RequestConsensusState {
 }
 
 pub struct CheckpointConsensusState {
-    pub digest: CheckpointDigest,
     pub sequence: u64,
     // Use HashMap to store proofs by digest so that malicious peers can't
     // lead to digeset mismatch.
-    pub proofs: HashMap<CheckpointDigest, Vec<SignedCheckpoint>>,
+    pub proofs: HashMap<u64, Vec<SignedCheckpoint>>,
 }
 
 impl CheckpointConsensusState {
     pub fn new(data: &Checkpoint) -> Self {
         Self {
-            digest: data.digest.clone(),
             sequence: data.sequence,
             proofs: HashMap::new(),
         }
     }
 
     pub fn is_stable(&self, nodes_count: usize) -> bool {
-        let proofs_count = self.proofs.get(&self.digest).map(|v| v.len()).unwrap_or(0);
+        let proofs_count = self.proofs.get(&self.sequence).map(|v| v.len()).unwrap_or(0);
 
         proofs_count >= quorum_size(nodes_count)
     }

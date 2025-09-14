@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, HashMap},
-    sync::{Arc, Mutex, RwLock},
+    sync::{Arc, Mutex},
 };
 use base64::{Engine as _, engine::general_purpose};
 use tracing::{debug, error, info, warn};
@@ -14,9 +14,8 @@ use crate::{
         CheckpointConsensusState, ConsensusLogIdx, PbftState, ReplicaState, RequestConsensusState,
         ViewChangeTimer,
     },
-    state_machine::StateMachie,
-    AcceptedRequest, Checkpoint, CheckpointDigest, ClientRequest, ClientResponse, Commit, Config,
-    MessageDigest, MessageMeta, NewView, OperationResultSequenced, PrePrepare, Prepare,
+    AcceptedRequest, Checkpoint, ClientRequest, Commit, Config,
+    MessageDigest, MessageMeta, NewView, PrePrepare, Prepare,
     PreparedProof, ProtocolMessage, Result, SignMessage, SignedCheckpoint, SignedCommit,
     SignedNewView, SignedPrePrepare, SignedPrepare, SignedViewChange, ViewChange,
     ViewChangeCheckpoint, NULL_DIGEST,
@@ -92,7 +91,6 @@ pub struct PbftExecutor {
     node_id: NodeId,
     config: Config,
     pbft_state: Arc<Mutex<PbftState>>,
-    state_machine: Arc<RwLock<dyn StateMachie>>,
 
     keypair: Arc<Secret>,
 
@@ -103,7 +101,6 @@ impl PbftExecutor {
     pub fn new(
         config: Config,
         keypair: Arc<Secret>,
-        state_machine: Arc<RwLock<dyn StateMachie>>,
         broadcaster: Arc<dyn PbftBroadcaster>,
     ) -> Self {
         let (tx, rx) = tokio::sync::mpsc::channel(10000);
@@ -123,7 +120,6 @@ impl PbftExecutor {
             backup_rx: Arc::new(Mutex::new(Some(backup_rx))),
             config,
             pbft_state: Arc::new(Mutex::new(state)),
-            state_machine,
             keypair,
             broadcaster,
         }
@@ -806,7 +802,6 @@ impl PbftExecutor {
             "attempting to apply messages"
         );
 
-        let mut responses = Vec::new();
         let mut checkpoints = Vec::new();
 
         // We skip already applied log entries and since we use BTreeMap, we will
@@ -833,8 +828,6 @@ impl PbftExecutor {
                 break;
             }
 
-            let mut state_machine = self.state_machine.write().unwrap();
-
             match state.message_store.get_by_seq_mut(idx.sequence) {
                 Some(store_msg) => {
                     // Make sure that the digest matches - this should always
@@ -842,7 +835,6 @@ impl PbftExecutor {
                     assert!(entry.digest == store_msg.digest());
 
                     info!(sequence = idx.sequence, "applying message");
-                    let result = state_machine.apply_operation(store_msg.operation());
                     // Sequence numbers increment strictly by 1.
                     *last_applied += 1;
                     assert!(*last_applied == idx.sequence);
@@ -859,20 +851,8 @@ impl PbftExecutor {
                             self.reset_timer(&mut state.timer);
                         }
                     }
-
-                    store_msg.set_opreation_result(result.clone());
-
-                    let result = OperationResultSequenced {
-                        result,
-                        sequence_number: idx.sequence,
-                    };
-                    if let crate::message_store::StoredMessage::AcceptedRequest(request) = store_msg
-                    {
-                        responses.push(ClientResponse {
-                            request: request.request.clone(),
-                            result,
-                        });
-                    }
+                    let applied = true;
+                    store_msg.set_opreation_result(applied);
                 }
                 None => {
                     // If we cannot apply the operation because we are missing the request,
@@ -883,20 +863,10 @@ impl PbftExecutor {
             };
 
             if *last_applied % self.config.checkpoint_frequency == 0 {
-                let checkpoint = state_machine.checkpoint(idx.sequence)?;
-                let digest = md5::compute(checkpoint.as_bytes());
-
-                let checkpoint_digest = CheckpointDigest(digest.0);
-                state.checkpoints.insert(idx.sequence, checkpoint.clone());
-                state
-                    .checkpoint_digests
-                    .insert(idx.sequence, checkpoint_digest.clone());
-
                 checkpoints.push(
                     Checkpoint {
                         replica_id: self.config.node_config.self_id,
                         sequence: idx.sequence,
-                        digest: checkpoint_digest,
                     }
                     .sign(&self.keypair)?,
                 )
@@ -921,7 +891,7 @@ impl PbftExecutor {
 
         let digest_proofs = entry
             .proofs
-            .entry(checkpoint.digest.clone())
+            .entry(checkpoint.sequence.clone())
             .or_insert(vec![]);
 
         for proof in digest_proofs.iter() {
@@ -1248,13 +1218,6 @@ impl PbftExecutor {
                     cp_msg.sequence
                 )));
             }
-
-            if cp_msg.digest != checkpoint.digest {
-                return Err(Error::InvalidViewChange(format!(
-                    "Proof digest does not match: {}",
-                    general_purpose::STANDARD.encode(cp_msg.digest.0)
-                )));
-            }
         }
 
         Ok(())
@@ -1375,7 +1338,7 @@ impl PbftExecutor {
             .map(|c| {
                 let proofs =
                     c.1.proofs
-                        .get(&c.1.digest)
+                        .get(&c.1.sequence)
                         // Since the checkpoint is stable it should be safe to unwrap
                         // here, and we should have enough proofs.
                         .unwrap()
@@ -1385,7 +1348,6 @@ impl PbftExecutor {
 
                 ViewChangeCheckpoint {
                     sequence: *c.0,
-                    digest: c.1.digest.clone(),
                     checkpoint_proofs: proofs,
                 }
             })
