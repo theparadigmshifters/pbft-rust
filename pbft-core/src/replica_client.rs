@@ -1,7 +1,7 @@
 use std::{pin::Pin, time::Duration};
 use futures::Future;
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{json, Value};
 use tracing::{debug, error};
 use crate::replica_api::{FinalizeBlockRequest, GetProposalRequest, JsonRpcRequest, JsonRpcResponse, VerifyProposalRequest};
 use async_trait::async_trait;
@@ -169,17 +169,19 @@ impl ReplicaClient {
 #[async_trait]
 impl ReplicaClientApi for ReplicaClient {
     async fn get_proposal(&self, msg: GetProposalRequest) -> Result<Value> {
-        let response = self.call(
-            msg,
-            "api/v1",
-            |client, msg, url| {
-                Box::pin(async move {
-                    ReplicaClient::send_with_retires(client, "get_proposal", &msg, &url).await
-                })
-            },
-        ).await?;
+        // let response = self.call(
+        //     msg,
+        //     "api/v1",
+        //     |client, msg, url| {
+        //         Box::pin(async move {
+        //             ReplicaClient::send_with_retires(client, "get_proposal", &msg, &url).await
+        //         })
+        //     },
+        // ).await?;
 
-        Ok(response.result)
+        // Ok(response.result)
+
+        Ok(json!("test"))
     }
 
     async fn verify_proposal(&self, msg: VerifyProposalRequest) -> Result<()> {
