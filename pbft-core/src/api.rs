@@ -7,7 +7,7 @@ pub const REPLICA_SIGNATURE_HEADER: &str = "pbft-signature-id";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProposeBlockMsgBroadcast {
-    pub request: ProposeBlockMsg,
+    pub proposal: ProposeBlockMsg,
     pub sequence_number: u64,
     pub pre_prepare: SignedPrePrepare,
 }

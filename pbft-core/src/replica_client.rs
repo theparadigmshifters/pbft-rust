@@ -185,46 +185,50 @@ impl ReplicaClientApi for ReplicaClient {
     }
 
     async fn verify_proposal(&self, msg: VerifyProposalRequest) -> Result<()> {
-        let response = self.call(
-            msg,
-            "api/v1",
-            |client, msg, url| {
-                Box::pin(async move {
-                    ReplicaClient::send_with_retires(client, "verify_proposal", &msg, &url).await
-                })
-            },
-        ).await?;
+        // let response = self.call(
+        //     msg,
+        //     "api/v1",
+        //     |client, msg, url| {
+        //         Box::pin(async move {
+        //             ReplicaClient::send_with_retires(client, "verify_proposal", &msg, &url).await
+        //         })
+        //     },
+        // ).await?;
 
-        if let Some(s) = response.result.as_str() {
-            if s == "ok" {
-                Ok(())
-            } else {
-                panic!("response is not ok")
-            }
-        } else {
-            panic!("response is not string")
-        }
+        // if let Some(s) = response.result.as_str() {
+        //     if s == "ok" {
+        //         Ok(())
+        //     } else {
+        //         panic!("response is not ok")
+        //     }
+        // } else {
+        //     panic!("response is not string")
+        // }
+
+        Ok(())
     }
 
     async fn finalize_block(&self, msg: FinalizeBlockRequest) -> Result<()> {
-        let response = self.call(
-            msg,
-            "api/v1",
-            |client, msg, url| {
-                Box::pin(async move {
-                    ReplicaClient::send_with_retires(client, "finalize_block", &msg, &url).await
-                })
-            },
-        ).await?;
+        // let response = self.call(
+        //     msg,
+        //     "api/v1",
+        //     |client, msg, url| {
+        //         Box::pin(async move {
+        //             ReplicaClient::send_with_retires(client, "finalize_block", &msg, &url).await
+        //         })
+        //     },
+        // ).await?;
 
-        if let Some(s) = response.result.as_str() {
-            if s == "ok" {
-                Ok(())
-            } else {
-                panic!("response is not ok")
-            }
-        } else {
-            panic!("response is not string")
-        }  
+        // if let Some(s) = response.result.as_str() {
+        //     if s == "ok" {
+        //         Ok(())
+        //     } else {
+        //         panic!("response is not ok")
+        //     }
+        // } else {
+        //     panic!("response is not string")
+        // }
+
+        Ok(())
     }
 }

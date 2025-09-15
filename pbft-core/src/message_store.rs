@@ -1,27 +1,27 @@
 use std::collections::{BTreeMap};
 
 use crate::{
-    AcceptedRequest, ProposeBlockMsg, MessageDigest,
+    AcceptedProposal, ProposeBlockMsg, MessageDigest,
     NULL_DIGEST,
 };
 type MessageLog = BTreeMap<u64, StoredMessage>;
 
 pub enum StoredMessage {
-    AcceptedRequest(AcceptedRequest),
+    AcceptedProposal(AcceptedProposal),
     Null { sequence: u64 },
 }
 
 impl StoredMessage {
     pub fn digest(&self) -> MessageDigest {
         match self {
-            StoredMessage::AcceptedRequest(req) => req.request.digest(),
+            StoredMessage::AcceptedProposal(req) => req.proposal.digest(),
             StoredMessage::Null { sequence: _ } => NULL_DIGEST,
         }
     }
 
     pub fn set_opreation_result(&mut self, result: bool) {
         match self {
-            StoredMessage::AcceptedRequest(req) => req.result = result,
+            StoredMessage::AcceptedProposal(req) => req.result = result,
             StoredMessage::Null { sequence: _ } => (),
         }
     }
@@ -38,12 +38,12 @@ impl MessageStore {
         }
     }
 
-    pub fn insert_client_request(&mut self, sequence: u64, request: ProposeBlockMsg) {
+    pub fn insert_proposal(&mut self, sequence: u64, proposal: ProposeBlockMsg) {
         self.inner_insert(
             sequence,
-            StoredMessage::AcceptedRequest(AcceptedRequest {
+            StoredMessage::AcceptedProposal(AcceptedProposal {
                 sequence,
-                request,
+                proposal,
                 result: false,
             }),
         );

@@ -63,9 +63,9 @@ impl ProposeBlockMsg {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
-pub struct AcceptedRequest {
+pub struct AcceptedProposal {
     pub sequence: u64,
-    pub request: ProposeBlockMsg,
+    pub proposal: ProposeBlockMsg,
     pub result: bool,
 }
 

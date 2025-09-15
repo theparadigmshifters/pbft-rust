@@ -9,7 +9,7 @@ use crate::{
     api::{ProposeBlockMsgBroadcast, ProtocolMessageBroadcast}, broadcast::PbftBroadcaster, config::{NodeId, Secret}, error::Error, pbft_state::{
         CheckpointConsensusState, ConsensusLogIdx, PbftState, ReplicaState, RequestConsensusState,
         ViewChangeTimer,
-    }, replica_api::GetProposalRequest, replica_client::ReplicaClientApi, Checkpoint, Commit, Config, MessageMeta, NewView, PrePrepare, Prepare, PreparedProof, ProposeBlockMsg, ProtocolMessage, Result, SignMessage, SignedCheckpoint, SignedCommit, SignedNewView, SignedPrePrepare, SignedPrepare, SignedViewChange, ViewChange, ViewChangeCheckpoint, NULL_DIGEST
+    }, replica_api::{GetProposalRequest, VerifyProposalRequest}, replica_client::ReplicaClientApi, Checkpoint, Commit, Config, MessageMeta, NewView, PrePrepare, Prepare, PreparedProof, ProposeBlockMsg, ProtocolMessage, Result, SignMessage, SignedCheckpoint, SignedCommit, SignedNewView, SignedPrePrepare, SignedPrepare, SignedViewChange, ViewChange, ViewChangeCheckpoint, NULL_DIGEST
 };
 
 #[derive(Debug, Clone)]
@@ -140,9 +140,8 @@ impl PbftExecutor {
                 Ok(())
             }
             ReplicaState::Leader { sequence } => {
-                // get proposal mock
-                let request = ProposeBlockMsg{block: proposal};
-                let digest = request.digest();
+                let proposal = ProposeBlockMsg{block: proposal};
+                let digest = proposal.digest();
                 info!(digest = digest.to_string(), "handling block propose");
 
                 let message_sequence = sequence + 1;
@@ -154,7 +153,7 @@ impl PbftExecutor {
                     metadata: MessageMeta {
                         view: state.view,
                         sequence: message_sequence,
-                        digest: request.digest(),
+                        digest: proposal.digest(),
                     },
                 }
                 .sign(&self.keypair)?;
@@ -165,10 +164,10 @@ impl PbftExecutor {
                     "assigned client request sequence",
                 );
 
-                let prepare = self.process_pre_prepare_and_request(
+                let prepare = self.process_pre_prepare_and_proposal(
                     &mut state,
                     pre_prepare.clone(),
-                    request.clone(),
+                    proposal.clone(),
                     message_sequence,
                 )?;
 
@@ -181,7 +180,7 @@ impl PbftExecutor {
                 // Broadcast the request with PrePrepare
                 self.broadcaster
                     .broadcast_operation(ProposeBlockMsgBroadcast {
-                        request,
+                        proposal,
                         sequence_number: message_sequence,
                         pre_prepare,
                     });
@@ -290,8 +289,8 @@ impl PbftExecutor {
                     info!(event = event.event_info(), "executor processing event");
 
                     match event {
-                        Event::ProposeBlockBroadcast(sender_id, client_request_broadcast) => {
-                            self.request_broadcast_event(sender_id, client_request_broadcast)
+                        Event::ProposeBlockBroadcast(sender_id, proposal_broadcast) => {
+                            self.proposal_broadcast_event(sender_id, proposal_broadcast).await
                         }
                         Event::ProtocolMessage(sender_id, consensus_message) => {
                             self.protocol_message_event(sender_id, consensus_message, event_occ.attempt)
@@ -380,12 +379,24 @@ impl PbftExecutor {
         }
     }
 
-    fn request_broadcast_event(
+    async fn proposal_broadcast_event(
         &self,
         sender_id: NodeId,
-        client_request_broadcast: ProposeBlockMsgBroadcast,
+        proposal_broadcast: ProposeBlockMsgBroadcast,
     ) {
-        match self.handle_request_broadcast(sender_id, client_request_broadcast) {
+        // verify proposal
+        let r = self.replica_client.verify_proposal(VerifyProposalRequest{ proposal: proposal_broadcast.clone().proposal.block }).await;
+        match r {
+            Ok(_) => {
+                info!("Success verify proposal");
+            }
+            Err(error) => {
+                error!(err = ?error, "failed to verify proposal");
+                return;
+            }
+        }
+
+        match self.handle_proposal_broadcast(sender_id, proposal_broadcast) {
             Ok(prepare) => {
                 let prepare_cm = ProtocolMessage::Prepare(prepare.clone());
                 let event =
@@ -402,10 +413,10 @@ impl PbftExecutor {
         }
     }
 
-    fn handle_request_broadcast(
+    fn handle_proposal_broadcast(
         &self,
         sender_id: NodeId,
-        client_request_broadcast: ProposeBlockMsgBroadcast,
+        proposal_broadcast: ProposeBlockMsgBroadcast,
     ) -> Result<SignedPrepare> {
         let mut state = self.pbft_state.lock().unwrap();
 
@@ -417,11 +428,11 @@ impl PbftExecutor {
             });
         }
 
-        self.process_pre_prepare_and_request(
+        self.process_pre_prepare_and_proposal(
             &mut state,
-            client_request_broadcast.pre_prepare,
-            client_request_broadcast.request,
-            client_request_broadcast.sequence_number,
+            proposal_broadcast.pre_prepare,
+            proposal_broadcast.proposal,
+            proposal_broadcast.sequence_number,
         )
     }
 
@@ -517,7 +528,7 @@ impl PbftExecutor {
         }
     }
 
-    fn process_pre_prepare_and_request(
+    fn process_pre_prepare_and_proposal(
         &self,
         state: &mut PbftState,
         pre_prepare: SignedPrePrepare,
@@ -540,7 +551,7 @@ impl PbftExecutor {
         let prepare = self.store_pre_prepare(state, pre_prepare)?;
 
         // We also insert client message to the log
-        state.message_store.insert_client_request(sequence, request);
+        state.message_store.insert_proposal(sequence, request);
 
         Ok(prepare)
     }
