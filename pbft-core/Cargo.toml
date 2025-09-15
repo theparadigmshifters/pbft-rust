@@ -22,6 +22,7 @@ tracing-subscriber = { version = "0.3.17", features = ["json", "env-filter"] }
 uuid = { version = "1.4.1", features = ["v4", "serde"] }
 crypto = { path = "../crypto" }
 blst = { git = "https://github.com/supranational/blst", branch = "master" }
+async-trait = "0.1"
 
 [dev-dependencies]
 lazy_static = "1.4.0"

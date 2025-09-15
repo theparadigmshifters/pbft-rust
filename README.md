@@ -24,13 +24,6 @@ PBFT_DEV=1 ../target/release/node
 
 Customization is possible with config files or environment variables.
 
-### Logging
-
-Use `RUST_LOG` environment variable to customize logging verbosity:
-```bash
-export RUST_LOG=kv_node=debug,pbft_core=debug
-```
-
 ### Triggering View Change
 
 In order to trigger the view change stop the leader replica (`replica0` when starting from scratch):
@@ -39,7 +32,6 @@ overmind stop replica0
 ```
 > **NOTE**: Make sure the replica actually stops (the graceful shutdown may wait for open connections to close). If you are not sure, simply execute the stop command twice, which will issue a `SIGKILL`.
 
-```
 The request will fail, but the view change protocol should kick in in few seconds.
 
 You can query the state endpoint to ensure the view has changed, and `replica1` is the leader now:

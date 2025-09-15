@@ -51,7 +51,7 @@ impl BroadcastError {
         move |error| Self::ResponseError { context, error }
     }
 
-    pub fn serde_error(context: &'static str) -> impl FnOnce(serde_json::Error) -> Self + '_ {
+    pub fn serde_error(context: &'static str) -> impl FnOnce(serde_json::Error) -> Self + 'static {
         move |error| Self::SerdeError { context, error }
     }
 }

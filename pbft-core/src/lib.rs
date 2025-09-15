@@ -8,6 +8,8 @@ pub mod api;
 pub mod broadcast;
 pub mod config;
 pub mod error;
+pub mod replica_client;
+pub mod replica_api;
 pub(crate) mod message_store;
 pub mod pbft;
 pub mod pbft_executor;
@@ -23,7 +25,7 @@ pub type Result<T> = std::result::Result<T, error::Error>;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq, Default)]
 pub struct Block {
-   pub payload: Vec<u8>
+   pub payload: String
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
@@ -49,7 +51,7 @@ impl std::fmt::Display for ClientRequestId {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
 pub struct ProposeBlockMsg {
-    pub block: Block,
+    pub block: String,
 }
 
 impl ProposeBlockMsg {

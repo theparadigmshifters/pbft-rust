@@ -1,9 +1,9 @@
 use std::sync::{Arc};
 use crypto::{PublicKey, Signature};
-use tracing::{info, error};
+use tracing::{info};
 
 use crate::{
-    api::ProposeBlockMsgBroadcast, broadcast::Broadcaster, config::NodeId, pbft_executor::{quorum_size, PbftExecutor}, ProtocolMessage
+    api::ProposeBlockMsgBroadcast, broadcast::Broadcaster, config::NodeId, pbft_executor::{quorum_size, PbftExecutor}, replica_client::ReplicaClient, ProtocolMessage
 };
 
 pub struct Pbft {
@@ -22,8 +22,9 @@ impl Pbft {
             config.node_config.nodes.clone(),
             keypair.clone(),
         ));
+        let replica_client = Arc::new(ReplicaClient::new());
         let pbft_executor =
-            PbftExecutor::new(config.clone(), keypair, broadcaster.clone());
+            PbftExecutor::new(config.clone(), keypair, broadcaster.clone(), replica_client);
 
         Ok(Self {
             pbft_executor,
@@ -36,8 +37,6 @@ impl Pbft {
         executor_rx_cancel: tokio::sync::broadcast::Receiver<()>,
         backup_rx_cancel: tokio::sync::broadcast::Receiver<()>,
     ) {
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(1));
-
         tokio::select! {
             _ = self.pbft_executor.run(executor_rx_cancel) => {
                 info!("pbft executor loop exited");
@@ -45,14 +44,7 @@ impl Pbft {
             _ = self.pbft_executor.run_backup_queue_watcher(backup_rx_cancel) => {
                 info!("pbft backup queue watcher exited");
             }
-            _ = async {
-            loop {
-                interval.tick().await;
-                if let Err(e) = self.pbft_executor.propose_block() {
-                    error!("Failed to propose block: {}", e);
-                }
-            }
-            } => {}
+            _ = self.pbft_executor.propose_block_loop() => {}
         }
     }
 

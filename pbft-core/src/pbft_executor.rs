@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, HashMap},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex}
 };
 use base64::{Engine as _, engine::general_purpose};
 use tracing::{debug, error, info, warn};
@@ -9,7 +9,7 @@ use crate::{
     api::{ProposeBlockMsgBroadcast, ProtocolMessageBroadcast}, broadcast::PbftBroadcaster, config::{NodeId, Secret}, error::Error, pbft_state::{
         CheckpointConsensusState, ConsensusLogIdx, PbftState, ReplicaState, RequestConsensusState,
         ViewChangeTimer,
-    }, Block, Checkpoint, Commit, Config, MessageMeta, NewView, PrePrepare, Prepare, PreparedProof, ProposeBlockMsg, ProtocolMessage, Result, SignMessage, SignedCheckpoint, SignedCommit, SignedNewView, SignedPrePrepare, SignedPrepare, SignedViewChange, ViewChange, ViewChangeCheckpoint, NULL_DIGEST
+    }, replica_api::GetProposalRequest, replica_client::ReplicaClientApi, Checkpoint, Commit, Config, MessageMeta, NewView, PrePrepare, Prepare, PreparedProof, ProposeBlockMsg, ProtocolMessage, Result, SignMessage, SignedCheckpoint, SignedCommit, SignedNewView, SignedPrePrepare, SignedPrepare, SignedViewChange, ViewChange, ViewChangeCheckpoint, NULL_DIGEST
 };
 
 #[derive(Debug, Clone)]
@@ -70,6 +70,7 @@ pub struct PbftExecutor {
     keypair: Arc<Secret>,
 
     broadcaster: Arc<dyn PbftBroadcaster>,
+    replica_client: Arc<dyn ReplicaClientApi>,
 }
 
 impl PbftExecutor {
@@ -77,6 +78,7 @@ impl PbftExecutor {
         config: Config,
         keypair: Arc<Secret>,
         broadcaster: Arc<dyn PbftBroadcaster>,
+        replica_client: Arc<dyn ReplicaClientApi>,
     ) -> Self {
         let (tx, rx) = tokio::sync::mpsc::channel(10000);
         let state = PbftState::new(
@@ -97,10 +99,33 @@ impl PbftExecutor {
             pbft_state: Arc::new(Mutex::new(state)),
             keypair,
             broadcaster,
+            replica_client,
         }
     }
 
-    pub fn propose_block(&self) -> Result<()> {
+    pub async fn propose_block_loop(&self) {
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(1));
+        loop {
+            interval.tick().await;
+
+            // get proposal from replica
+            let r = self.replica_client.get_proposal(GetProposalRequest{}).await;
+            match r {
+                Ok(value) => {
+                    info!("Success get proposal");
+                    let proposal = value.as_str().unwrap().to_string();
+                    if let Err(e) = self.propose_block(proposal) {
+                        error!("Failed to propose block: {}", e);
+                    }
+                }
+                Err(error) => {
+                    error!(err = ?error, "failed to get proposal");
+                }
+            }
+        }
+    }
+
+    pub fn propose_block(&self, proposal: String) -> Result<()> {
         let mut state = self.pbft_state.lock().unwrap();
 
         match state.replica_state {
@@ -116,7 +141,7 @@ impl PbftExecutor {
             }
             ReplicaState::Leader { sequence } => {
                 // get proposal mock
-                let request = ProposeBlockMsg{block: Block { payload: "test".as_bytes().to_vec() }};
+                let request = ProposeBlockMsg{block: proposal};
                 let digest = request.digest();
                 info!(digest = digest.to_string(), "handling block propose");
 
