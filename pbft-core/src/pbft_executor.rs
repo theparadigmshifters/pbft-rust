@@ -27,9 +27,10 @@ impl Event {
                 sender.0, req.sequence_number
             ),
             Event::ProtocolMessage(sender, cm) => format!(
-                "ProtocolMessage: Sender: {}, Msg: {})",
+                "ProtocolMessage: Sender: {}, Msg: {}, Sequence: {}))",
                 sender.0,
-                cm.message_type_str()
+                cm.message_type_str(),
+                cm.sequence().unwrap_or_default()
             ),
             Event::ViewChangeTimerExpired() => format!("ViewChangeTimerExpired"),
         }
@@ -57,12 +58,6 @@ pub struct PbftExecutor {
     // the Executor itself.
     event_rx: Arc<Mutex<Option<tokio::sync::mpsc::Receiver<EventOccurance>>>>,
 
-    // backup_queue is used if the main queue is full.
-    // For real system, this could be backed by some persistant storage to ofload
-    // the memory. Here we are going to simply use unbouded channel.
-    backup_queue: tokio::sync::mpsc::UnboundedSender<EventOccurance>,
-    backup_rx: Arc<Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<EventOccurance>>>>,
-
     node_id: NodeId,
     config: Config,
     pbft_state: Arc<Mutex<PbftState>>,
@@ -87,14 +82,10 @@ impl PbftExecutor {
             config.checkpoint_frequency * 2,
         );
 
-        let (backup_tx, backup_rx) = tokio::sync::mpsc::unbounded_channel();
-
         Self {
             event_tx: tx.clone(),
             event_rx: Arc::new(Mutex::new(Some(rx))),
             node_id: config.node_config.self_id,
-            backup_queue: backup_tx.clone(),
-            backup_rx: Arc::new(Mutex::new(Some(backup_rx))),
             config,
             pbft_state: Arc::new(Mutex::new(state)),
             keypair,
@@ -103,25 +94,30 @@ impl PbftExecutor {
         }
     }
 
-    pub async fn propose_block_loop(&self) {
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(1));
-        loop {
-            interval.tick().await;
+    pub async fn get_and_propose_block(&self) {
+        let is_leader = {
+            let state = self.pbft_state.lock().unwrap();
+            matches!(state.replica_state, ReplicaState::Leader { .. })
+        };
 
-            // get proposal from replica
-            let r = self.replica_client.get_proposal(GetProposalRequest{}).await;
-            match r {
+        let proposal = if is_leader {
+            std::thread::sleep(std::time::Duration::from_millis(1000));
+            match self.replica_client.get_proposal(GetProposalRequest{}).await {
                 Ok(value) => {
-                    info!("Success get proposal");
-                    let proposal = value.as_str().unwrap().to_string();
-                    if let Err(e) = self.propose_block(proposal) {
-                        error!("Failed to propose block: {}", e);
-                    }
+                    info!(proposal = value.to_string(), "Success get proposal");
+                    value.as_str().unwrap().to_string()
                 }
                 Err(error) => {
                     error!(err = ?error, "failed to get proposal");
+                    String::new()
                 }
             }
+        } else {
+            String::new()
+        };
+
+        if let Err(e) = self.propose_block(proposal) {
+            error!("Failed to propose block: {}", e);
         }
     }
 
@@ -161,7 +157,7 @@ impl PbftExecutor {
                 info!(
                     digest = digest.to_string(),
                     sequence = message_sequence,
-                    "assigned client request sequence",
+                    "assigned proposal sequence",
                 );
 
                 let prepare = self.process_pre_prepare_and_proposal(
@@ -226,8 +222,8 @@ impl PbftExecutor {
     fn queue_event(&self, event: EventOccurance) {
         if let Err(err) = self.event_tx.try_send(event) {
             match err {
-                tokio::sync::mpsc::error::TrySendError::Full(prepare_event) => {
-                    self.push_to_backup_queue(prepare_event)
+                tokio::sync::mpsc::error::TrySendError::Full(_) => {
+                    warn!("failed to send protocol message event, queue full")
                 }
                 tokio::sync::mpsc::error::TrySendError::Closed(_) => {
                     warn!("failed to send protocol message event, queue closed -- pbft module might have been stopped")
@@ -246,19 +242,13 @@ impl PbftExecutor {
         });
     }
 
-    fn push_to_backup_queue(&self, event: EventOccurance) {
-        match self.backup_queue.send(event) {
-            Ok(_) => {}
-            Err(err) => {
-                error!(error = ?err, "failed to push event to backup queue, system might be shutting down");
-            }
-        }
-    }
-
     // NOTE: the drawback of this approach is that we are limmited to single
     // therad, however we lock the state on every event anyway, so making it
     // concurent would not bring much benefit.
     pub async fn run(&self, mut rx_cancel: tokio::sync::broadcast::Receiver<()>) {
+        // init propose
+        self.get_and_propose_block().await;
+
         // HACK: hack to take full ownership of the receiver without needing a
         // mutable reference to the executor itself.
         let event_rx = self.event_rx.lock().unwrap().take();
@@ -293,49 +283,12 @@ impl PbftExecutor {
                             self.proposal_broadcast_event(sender_id, proposal_broadcast).await
                         }
                         Event::ProtocolMessage(sender_id, consensus_message) => {
-                            self.protocol_message_event(sender_id, consensus_message, event_occ.attempt)
+                            self.protocol_message_event(sender_id, consensus_message, event_occ.attempt).await
                         }
                         Event::ViewChangeTimerExpired() => {
                             self.view_change_timer_event();
                         }
                     };
-                }
-            }
-        }
-    }
-
-    // For real implementation we could watch saturation of the main queue and if
-    // it has space to process events read from the backup queue and push the
-    // events there.
-    pub async fn run_backup_queue_watcher(
-        &self,
-        mut rx_cancel: tokio::sync::broadcast::Receiver<()>,
-    ) {
-        let backup_event_rx = self.backup_rx.lock().unwrap().take();
-        if backup_event_rx.is_none() {
-            error!("backup event channel is not present, cannot start executor event loop");
-            return;
-        }
-        let mut backup_event_rx = backup_event_rx.unwrap();
-
-        loop {
-            tokio::select! {
-                _ = rx_cancel.recv() => {
-                    info!("received cancel signal");
-                    return;
-                }
-                event = backup_event_rx.recv() => {
-                    if event.is_none() {
-                        warn!("backup channel closed, stopping executor event loop");
-                        return;
-                    }
-
-                    match self.event_tx.send(event.unwrap()).await {
-                        Ok(_) => {}
-                        Err(err) => {
-                            error!(error = ?err, "failed to send event from backup queue to main queue, system might be shutting down");
-                        }
-                    }
                 }
             }
         }
@@ -436,13 +389,13 @@ impl PbftExecutor {
         )
     }
 
-    fn protocol_message_event(
+    async fn protocol_message_event(
         &self,
         sender_id: NodeId,
         protocol_message: ProtocolMessage,
         attempt: u32,
     ) {
-        match self.process_protocol_message(protocol_message.clone(), sender_id) {
+        match self.process_protocol_message(protocol_message.clone(), sender_id).await {
             Ok(p_messages) => {
                 for p_msg in p_messages.iter() {
                     // Do not queue NewView message for yourself to process
@@ -484,7 +437,7 @@ impl PbftExecutor {
         }
     }
 
-    fn process_protocol_message(
+    async fn process_protocol_message(
         &self,
         message: ProtocolMessage,
         sender_id: NodeId,
@@ -495,37 +448,46 @@ impl PbftExecutor {
             }
         }
 
-        let mut state = self.pbft_state.lock().unwrap();
+        let (result, should_propose) = {
+            let mut state = self.pbft_state.lock().unwrap();
+            self.ensure_can_handle_message(&state, &message)?;
+            match message {
+                ProtocolMessage::PrePrepare(pre_prepare) => {
+                    // PrePrepare is handled separately with client request
+                    (Err(Error::PrePrepareMessageWithoutClientRequest {
+                        view: state.view,
+                        sequence: pre_prepare.metadata.sequence,
+                    }), false)
+                }
+                ProtocolMessage::Prepare(prepare) => {
+                    let cm = self
+                        .process_prepare(&mut state, prepare)?
+                        .map(|cm| vec![cm])
+                        .unwrap_or_default();
+                    (Ok(cm), false)
+                }
+                ProtocolMessage::Commit(commit) => {
+                    self.process_commit(&mut state, commit)
+                }
+                ProtocolMessage::Checkpoint(checkpoint) => {
+                    self.process_checkpoint_message(&mut state, checkpoint);
+                    (Ok(vec![]), false)
+                }
+                ProtocolMessage::ViewChange(view_change) => {
+                    let r = self.process_view_change_message(&mut state, view_change);
+                    (r, false)
+                }
+                ProtocolMessage::NewView(new_view) => {
+                    let r = self.process_new_view_message(&mut state, new_view);
+                    (r, false)
+                }
+            }
+        };
 
-        self.ensure_can_handle_message(&state, &message)?;
-
-        match message {
-            ProtocolMessage::PrePrepare(pre_prepare) => {
-                // PrePrepare is handled separately with client request
-                Err(Error::PrePrepareMessageWithoutClientRequest {
-                    view: state.view,
-                    sequence: pre_prepare.metadata.sequence,
-                })
-            }
-            ProtocolMessage::Prepare(prepare) => {
-                let cm = self
-                    .process_prepare(&mut state, prepare)?
-                    .map(|cm| vec![cm])
-                    .unwrap_or_default();
-                Ok(cm)
-            }
-            ProtocolMessage::Commit(commit) => self.process_commit(&mut state, commit),
-            ProtocolMessage::Checkpoint(checkpoint) => {
-                self.process_checkpoint_message(&mut state, checkpoint);
-                Ok(vec![])
-            }
-            ProtocolMessage::ViewChange(view_change) => {
-                self.process_view_change_message(&mut state, view_change)
-            }
-            ProtocolMessage::NewView(new_view) => {
-                self.process_new_view_message(&mut state, new_view)
-            }
+        if should_propose {
+            self.get_and_propose_block().await;
         }
+        result
     }
 
     fn process_pre_prepare_and_proposal(
@@ -704,11 +666,14 @@ impl PbftExecutor {
         &self,
         state: &mut PbftState,
         commit: SignedCommit,
-    ) -> Result<Vec<ProtocolMessage>> {
+    ) -> (Result<Vec<ProtocolMessage>>, bool) {
         // verify signature
-        let ok = commit.verify()?;
+        let ok = match commit.verify() {
+            Ok(valid) => valid,
+            Err(_) => return (Err(Error::InvalidSignature), false),
+        };
         if !ok {
-            return Err(Error::InvalidSignature);
+            return (Err(Error::InvalidSignature), false);
         }
 
         let message_meta = commit.metadata.clone();
@@ -721,12 +686,12 @@ impl PbftExecutor {
         // If we received message for a given view and sequence number with different digest,
         // we reject it.
         if message_meta.digest != entry.digest {
-            return Err(Error::CommitForViewAndSequenceDoesNotMatchDigest {
+            return (Err(Error::CommitForViewAndSequenceDoesNotMatchDigest {
                 view: message_meta.view,
                 sequence: message_meta.sequence,
                 expected: entry.digest.clone(),
                 actual: message_meta.digest,
-            });
+            }), false);
         }
 
         // If we already have Commit message from this replica, we do not add it again.
@@ -747,16 +712,19 @@ impl PbftExecutor {
             if !entry.reported_committed_local {
                 entry.reported_committed_local = true;
                 // We will try to apply all messages that we can
-                let checkpoints = self.apply_messages(state)?;
-                checkpoints.into_iter().map(|m| m.into()).collect()
+                let checkpoints = match self.apply_messages(state) {
+                    Ok(c) => c,
+                    Err(e) => return (Err(e.into()), false),
+                };
+                (checkpoints.into_iter().map(|m| m.into()).collect(), true)
             } else {
-                vec![]
+                (vec![], false)
             }
         } else {
-            vec![]
+            (vec![], false)
         };
 
-        Ok(result)
+        (Ok(result.0), result.1)
     }
 
     // TODO: I could consider making it an event to unwind this a bit

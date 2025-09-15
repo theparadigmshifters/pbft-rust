@@ -195,14 +195,11 @@ impl ReplicaClientApi for ReplicaClient {
         //     },
         // ).await?;
 
-        // if let Some(s) = response.result.as_str() {
-        //     if s == "ok" {
-        //         Ok(())
-        //     } else {
-        //         panic!("response is not ok")
-        //     }
+        // let s = response.result.to_string();
+        // if s == "ok" {
+        //     Ok(())
         // } else {
-        //     panic!("response is not string")
+        //     panic!("response is not ok")
         // }
 
         Ok(())
@@ -219,14 +216,11 @@ impl ReplicaClientApi for ReplicaClient {
         //     },
         // ).await?;
 
-        // if let Some(s) = response.result.as_str() {
-        //     if s == "ok" {
-        //         Ok(())
-        //     } else {
-        //         panic!("response is not ok")
-        //     }
+        // let s = response.result.to_string();
+        // if s == "ok" {
+        //     Ok(())
         // } else {
-        //     panic!("response is not string")
+        //     panic!("response is not ok")
         // }
 
         Ok(())

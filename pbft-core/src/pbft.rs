@@ -1,6 +1,5 @@
 use std::sync::{Arc};
 use crypto::{PublicKey, Signature};
-use tracing::{info};
 
 use crate::{
     api::ProposeBlockMsgBroadcast, broadcast::Broadcaster, config::NodeId, pbft_executor::{quorum_size, PbftExecutor}, replica_client::ReplicaClient, ProtocolMessage
@@ -35,17 +34,8 @@ impl Pbft {
     pub async fn start(
         &self,
         executor_rx_cancel: tokio::sync::broadcast::Receiver<()>,
-        backup_rx_cancel: tokio::sync::broadcast::Receiver<()>,
     ) {
-        tokio::select! {
-            _ = self.pbft_executor.run(executor_rx_cancel) => {
-                info!("pbft executor loop exited");
-            }
-            _ = self.pbft_executor.run_backup_queue_watcher(backup_rx_cancel) => {
-                info!("pbft backup queue watcher exited");
-            }
-            _ = self.pbft_executor.propose_block_loop() => {}
-        }
+        self.pbft_executor.run(executor_rx_cancel).await;
     }
 
     pub fn quorum_size(&self) -> usize {

@@ -16,11 +16,10 @@ pub async fn start(
 
     let pbft_module_m = pbft_module.clone();
     let pbft_executor_rx_cancel = inner_tx_cancel.subscribe();
-    let pbft_backup_queue_rx_cancel = inner_tx_cancel.subscribe();
     info!("starting pbft module...");
     let pbft_handle = tokio::spawn(async move {
         pbft_module_m
-            .start(pbft_executor_rx_cancel, pbft_backup_queue_rx_cancel)
+            .start(pbft_executor_rx_cancel)
             .await
     });
 
