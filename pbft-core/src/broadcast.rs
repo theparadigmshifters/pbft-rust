@@ -187,7 +187,7 @@ impl Broadcaster {
                 "replica failed to sent message"
             );
 
-            if attempt > 3 {
+            if attempt > 1 {
                 return Err(BroadcastError::RetriesLimitExceededError {
                     url: url.to_string(),
                     attempts: attempt,

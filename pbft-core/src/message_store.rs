@@ -19,7 +19,14 @@ impl StoredMessage {
         }
     }
 
-    pub fn set_opreation_result(&mut self, result: bool) {
+    pub fn proposal(&self) -> String {
+        match self {
+            StoredMessage::AcceptedProposal(req) => req.proposal.block.clone(),
+            StoredMessage::Null { sequence: _ } => String::new(),
+        }
+    }
+
+    pub fn set_proposal_result(&mut self, result: bool) {
         match self {
             StoredMessage::AcceptedProposal(req) => req.result = result,
             StoredMessage::Null { sequence: _ } => (),

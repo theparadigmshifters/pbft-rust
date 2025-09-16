@@ -9,7 +9,7 @@ use crate::{
     api::{ProposeBlockMsgBroadcast, ProtocolMessageBroadcast}, broadcast::PbftBroadcaster, config::{NodeId, Secret}, error::Error, pbft_state::{
         CheckpointConsensusState, ConsensusLogIdx, PbftState, ReplicaState, RequestConsensusState,
         ViewChangeTimer,
-    }, replica_api::{GetProposalRequest, VerifyProposalRequest}, replica_client::ReplicaClientApi, Checkpoint, Commit, Config, MessageMeta, NewView, PrePrepare, Prepare, PreparedProof, ProposeBlockMsg, ProtocolMessage, Result, SignMessage, SignedCheckpoint, SignedCommit, SignedNewView, SignedPrePrepare, SignedPrepare, SignedViewChange, ViewChange, ViewChangeCheckpoint, NULL_DIGEST
+    }, replica_api::{FinalizeBlockRequest, GetProposalRequest, VerifyProposalRequest}, replica_client::ReplicaClientApi, Checkpoint, Commit, Config, MessageMeta, NewView, PrePrepare, Prepare, PreparedProof, ProposeBlockMsg, ProtocolMessage, Result, SignMessage, SignedCheckpoint, SignedCommit, SignedNewView, SignedPrePrepare, SignedPrepare, SignedViewChange, ViewChange, ViewChangeCheckpoint, NULL_DIGEST
 };
 
 #[derive(Debug, Clone)]
@@ -27,10 +27,11 @@ impl Event {
                 sender.0, req.sequence_number
             ),
             Event::ProtocolMessage(sender, cm) => format!(
-                "ProtocolMessage: Sender: {}, Msg: {}, Sequence: {}))",
+                "ProtocolMessage: Sender: {}, Msg: {}, Sequence: {}, View: {}))",
                 sender.0,
                 cm.message_type_str(),
-                cm.sequence().unwrap_or_default()
+                cm.sequence().unwrap_or_default(),
+                cm.in_view().unwrap_or_default(),
             ),
             Event::ViewChangeTimerExpired() => format!("ViewChangeTimerExpired"),
         }
@@ -101,7 +102,7 @@ impl PbftExecutor {
         };
 
         let proposal = if is_leader {
-            std::thread::sleep(std::time::Duration::from_millis(1000));
+            tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
             match self.replica_client.get_proposal(GetProposalRequest{}).await {
                 Ok(value) => {
                     info!(proposal = value.to_string(), "Success get proposal");
@@ -399,7 +400,8 @@ impl PbftExecutor {
             Ok(p_messages) => {
                 for p_msg in p_messages.iter() {
                     // Do not queue NewView message for yourself to process
-                    if !p_msg.is_new_view() {
+                    let is_new_view = p_msg.is_new_view();
+                    if !is_new_view {
                         let event =
                             Event::ProtocolMessage(self.config.node_config.self_id, p_msg.clone());
                         self.queue_event(event.into());
@@ -407,6 +409,12 @@ impl PbftExecutor {
 
                     self.broadcaster
                         .broadcast_consensus_message(ProtocolMessageBroadcast::new(p_msg.clone()));
+
+                    if is_new_view {
+                        info!("processed NewView message, attempting to propose new block");
+                        // After processing NewView message, we try to propose a new block
+                        self.get_and_propose_block().await;
+                    }
                 }
             }
             Err(err) => {
@@ -448,7 +456,7 @@ impl PbftExecutor {
             }
         }
 
-        let (result, should_propose) = {
+        let (result, executed_proposals) = {
             let mut state = self.pbft_state.lock().unwrap();
             self.ensure_can_handle_message(&state, &message)?;
             match message {
@@ -457,34 +465,39 @@ impl PbftExecutor {
                     (Err(Error::PrePrepareMessageWithoutClientRequest {
                         view: state.view,
                         sequence: pre_prepare.metadata.sequence,
-                    }), false)
+                    }), vec![])
                 }
                 ProtocolMessage::Prepare(prepare) => {
                     let cm = self
                         .process_prepare(&mut state, prepare)?
                         .map(|cm| vec![cm])
                         .unwrap_or_default();
-                    (Ok(cm), false)
+                    (Ok(cm), vec![])
                 }
                 ProtocolMessage::Commit(commit) => {
-                    self.process_commit(&mut state, commit)
+                    let r = self.process_commit(&mut state, commit);
+                    (r.0, r.1.clone())
                 }
                 ProtocolMessage::Checkpoint(checkpoint) => {
                     self.process_checkpoint_message(&mut state, checkpoint);
-                    (Ok(vec![]), false)
+                    (Ok(vec![]), vec![])
                 }
                 ProtocolMessage::ViewChange(view_change) => {
                     let r = self.process_view_change_message(&mut state, view_change);
-                    (r, false)
+                    (r, vec![])
                 }
                 ProtocolMessage::NewView(new_view) => {
                     let r = self.process_new_view_message(&mut state, new_view);
-                    (r, false)
+                    (r, vec![])
                 }
             }
         };
 
-        if should_propose {
+        for p in executed_proposals {
+            info!("Finalizing executed proposal: {}", p);
+            self.replica_client.finalize_block(FinalizeBlockRequest::new(p)).await.unwrap();
+
+            // After executing a proposal, we try to propose a new one
             self.get_and_propose_block().await;
         }
         result
@@ -666,14 +679,14 @@ impl PbftExecutor {
         &self,
         state: &mut PbftState,
         commit: SignedCommit,
-    ) -> (Result<Vec<ProtocolMessage>>, bool) {
+    ) -> (Result<Vec<ProtocolMessage>>, Vec<String>) {
         // verify signature
         let ok = match commit.verify() {
             Ok(valid) => valid,
-            Err(_) => return (Err(Error::InvalidSignature), false),
+            Err(_) => return (Err(Error::InvalidSignature), vec![]),
         };
         if !ok {
-            return (Err(Error::InvalidSignature), false);
+            return (Err(Error::InvalidSignature), vec![]);
         }
 
         let message_meta = commit.metadata.clone();
@@ -691,7 +704,7 @@ impl PbftExecutor {
                 sequence: message_meta.sequence,
                 expected: entry.digest.clone(),
                 actual: message_meta.digest,
-            }), false);
+            }), vec![]);
         }
 
         // If we already have Commit message from this replica, we do not add it again.
@@ -712,16 +725,16 @@ impl PbftExecutor {
             if !entry.reported_committed_local {
                 entry.reported_committed_local = true;
                 // We will try to apply all messages that we can
-                let checkpoints = match self.apply_messages(state) {
+                let (checkpoints, executed_proposals) = match self.apply_messages(state) {
                     Ok(c) => c,
-                    Err(e) => return (Err(e.into()), false),
+                    Err(e) => return (Err(e.into()), vec![]),
                 };
-                (checkpoints.into_iter().map(|m| m.into()).collect(), true)
+                (checkpoints.into_iter().map(|m| m.into()).collect(), executed_proposals)
             } else {
-                (vec![], false)
+                (vec![], vec![])
             }
         } else {
-            (vec![], false)
+            (vec![], vec![])
         };
 
         (Ok(result.0), result.1)
@@ -731,7 +744,7 @@ impl PbftExecutor {
     fn apply_messages(
         &self,
         state: &mut PbftState,
-    ) -> Result<Vec<SignedCheckpoint>> {
+    ) -> Result<(Vec<SignedCheckpoint>, Vec<String>)> {
         // Start from state.last_applied
         let last_applied = &mut state.last_applied_seq;
 
@@ -742,7 +755,7 @@ impl PbftExecutor {
             .iter()
             .position(|(idx, _)| idx.sequence > *last_applied);
         if start.is_none() {
-            return Ok(vec![]);
+            return Ok((vec![], vec![]));
         }
 
         debug!(
@@ -752,6 +765,7 @@ impl PbftExecutor {
         );
 
         let mut checkpoints = Vec::new();
+        let mut executed_proposals = Vec::new();
 
         // We skip already applied log entries and since we use BTreeMap, we will
         // apply messages in order.
@@ -788,6 +802,8 @@ impl PbftExecutor {
                     *last_applied += 1;
                     assert!(*last_applied == idx.sequence);
 
+                    executed_proposals.push(store_msg.proposal());
+
                     // Stop View Change timer if this message started it
                     if let Some(_) = &state.timer {
                         // The message that started the timer was applied,
@@ -798,13 +814,17 @@ impl PbftExecutor {
                         self.reset_timer(&mut state.timer);
                     }
                     let applied = true;
-                    store_msg.set_opreation_result(applied);
+                    store_msg.set_proposal_result(applied);
                 }
                 None => {
                     // If we cannot apply the operation because we are missing the request,
                     // we stop applying messages
                     // TODO: we could queue some request to other replicas to fetch messages here
-                    return Ok(checkpoints);
+                    error!(
+                        sequence = idx.sequence,
+                        "cannot apply message, missing preimage"
+                    );
+                    return Ok((checkpoints, executed_proposals));
                 }
             };
 
@@ -818,7 +838,7 @@ impl PbftExecutor {
                 )
             }
         }
-        Ok(checkpoints)
+        Ok((checkpoints, executed_proposals))
     }
 
     fn reset_timer(&self, timer: &mut Option<ViewChangeTimer>) {
@@ -991,7 +1011,7 @@ impl PbftExecutor {
                     &new_view,
                 )?;
 
-                cm_messages.push(ProtocolMessage::NewView(new_view));
+                cm_messages.insert(0, ProtocolMessage::NewView(new_view));
 
                 return Ok(cm_messages);
             }
