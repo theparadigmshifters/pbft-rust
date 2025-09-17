@@ -106,7 +106,7 @@ impl PbftExecutor {
             match self.replica_client.get_proposal().await {
                 Ok(value) => {
                     info!(proposal = value.to_string(), "Success get proposal");
-                    value.as_str().unwrap().to_string()
+                    value.to_string()
                 }
                 Err(error) => {
                     error!(err = ?error, "failed to get proposal");

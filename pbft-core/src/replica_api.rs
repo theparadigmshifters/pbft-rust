@@ -6,17 +6,17 @@ pub struct JsonRpcRequest {
     pub jsonrpc: String,
     pub method: String,
     #[serde(default)]
-    pub params: Value,
+    pub params: Vec<String>,
     #[serde(default)]
     pub id: Value,
 }
 
 impl JsonRpcRequest {
-    pub fn new(method: &str, params: Value) -> Self {
+    pub fn new(method: &str, msg: String) -> Self {
         Self {
             jsonrpc: "2.0".to_string(),
             method: method.to_string(),
-            params,
+            params: vec![msg],
             id: Value::Null,
         }
     }
