@@ -169,60 +169,60 @@ impl ReplicaClient {
 #[async_trait]
 impl ReplicaClientApi for ReplicaClient {
     async fn get_proposal(&self, msg: GetProposalRequest) -> Result<Value> {
-        // let response = self.call(
-        //     msg,
-        //     "api/v1",
-        //     |client, msg, url| {
-        //         Box::pin(async move {
-        //             ReplicaClient::send_with_retires(client, "get_proposal", &msg, &url).await
-        //         })
-        //     },
-        // ).await?;
+        let response = self.call(
+            msg,
+            "",
+            |client, msg, url| {
+                Box::pin(async move {
+                    ReplicaClient::send_with_retires(client, "get_proposal", &msg, &url).await
+                })
+            },
+        ).await?;
 
-        // Ok(response.result)
+        Ok(response.result)
 
-        Ok(json!("test"))
+        // Ok(json!("test"))
     }
 
     async fn verify_proposal(&self, msg: VerifyProposalRequest) -> Result<()> {
-        // let response = self.call(
-        //     msg,
-        //     "api/v1",
-        //     |client, msg, url| {
-        //         Box::pin(async move {
-        //             ReplicaClient::send_with_retires(client, "verify_proposal", &msg, &url).await
-        //         })
-        //     },
-        // ).await?;
+        let response = self.call(
+            msg,
+            "",
+            |client, msg, url| {
+                Box::pin(async move {
+                    ReplicaClient::send_with_retires(client, "verify_proposal", &msg, &url).await
+                })
+            },
+        ).await?;
 
-        // let s = response.result.to_string();
-        // if s == "ok" {
-        //     Ok(())
-        // } else {
-        //     panic!("response is not ok")
-        // }
+        let s = response.result.to_string();
+        if s == "ok" {
+            Ok(())
+        } else {
+            panic!("response is not ok")
+        }
 
-        Ok(())
+        // Ok(())
     }
 
     async fn finalize_block(&self, msg: FinalizeBlockRequest) -> Result<()> {
-        // let response = self.call(
-        //     msg,
-        //     "api/v1",
-        //     |client, msg, url| {
-        //         Box::pin(async move {
-        //             ReplicaClient::send_with_retires(client, "finalize_block", &msg, &url).await
-        //         })
-        //     },
-        // ).await?;
+        let response = self.call(
+            msg,
+            "",
+            |client, msg, url| {
+                Box::pin(async move {
+                    ReplicaClient::send_with_retires(client, "finalize_block", &msg, &url).await
+                })
+            },
+        ).await?;
 
-        // let s = response.result.to_string();
-        // if s == "ok" {
-        //     Ok(())
-        // } else {
-        //     panic!("response is not ok")
-        // }
+        let s = response.result.to_string();
+        if s == "ok" {
+            Ok(())
+        } else {
+            panic!("response is not ok")
+        }
 
-        Ok(())
+        // Ok(())
     }
 }
