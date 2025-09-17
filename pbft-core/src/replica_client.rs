@@ -93,7 +93,7 @@ impl ReplicaClient {
         msg: &T,
         url: &str,
     ) -> Result<JsonRpcResponse> {
-        let params = serde_json::json!(vec![msg]);
+        let params = Value::Array(vec![json!(msg)]);
         let json_rpc_request = JsonRpcRequest::new(method, params);
         let body = serde_json::to_vec(&json_rpc_request)
         .map_err(ReplicaClientError::serde_error("failed to serialize JSON-RPC request"))?;
