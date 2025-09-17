@@ -192,7 +192,7 @@ impl ReplicaClientApi for ReplicaClient {
             },
         ).await?;
 
-        let s = response.result.to_string();
+        let s = response.result.as_str().unwrap().to_string();
         if s == "ok" {
             Ok(())
         } else {
@@ -213,7 +213,7 @@ impl ReplicaClientApi for ReplicaClient {
             },
         ).await?;
 
-        let s = response.result.to_string();
+        let s = response.result.as_str().unwrap().to_string();
         if s == "ok" {
             Ok(())
         } else {
