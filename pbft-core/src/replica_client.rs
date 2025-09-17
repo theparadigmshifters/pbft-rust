@@ -3,7 +3,7 @@ use futures::Future;
 use serde::Serialize;
 use serde_json::{json, Value};
 use tracing::{debug, error};
-use crate::replica_api::{FinalizeBlockRequest, GetProposalRequest, JsonRpcRequest, JsonRpcResponse, VerifyProposalRequest};
+use crate::replica_api::{JsonRpcRequest, JsonRpcResponse};
 use async_trait::async_trait;
 
 #[derive(Debug, thiserror::Error)]
@@ -53,9 +53,9 @@ impl ReplicaClientError {
 
 #[async_trait]
 pub trait ReplicaClientApi: Send + Sync {
-    async fn get_proposal(&self, msg: GetProposalRequest) -> Result<Value>;
-    async fn verify_proposal(&self, msg: VerifyProposalRequest) -> Result<()>;
-    async fn finalize_block(&self, msg: FinalizeBlockRequest) -> Result<()>;
+    async fn get_proposal(&self) -> Result<Value>;
+    async fn verify_proposal(&self, msg: String) -> Result<()>;
+    async fn finalize_block(&self, msg: String) -> Result<()>;
 }
 
 type Result<T> = std::result::Result<T, ReplicaClientError>;
@@ -93,11 +93,9 @@ impl ReplicaClient {
         msg: &T,
         url: &str,
     ) -> Result<JsonRpcResponse> {
-        let params = serde_json::to_value(msg).map_err(ReplicaClientError::serde_error(
-            "failed to serialize request body",
-        ))?;
-
-        let json_rpc_request = JsonRpcRequest::new(method, params);
+        let msg_value = serde_json::to_value(msg)
+            .map_err(ReplicaClientError::serde_error("failed to convert message to Value"))?;
+        let json_rpc_request = JsonRpcRequest::new(method, msg_value);
         let body = serde_json::to_vec(&json_rpc_request)
         .map_err(ReplicaClientError::serde_error("failed to serialize JSON-RPC request"))?;
 
@@ -149,7 +147,7 @@ impl ReplicaClient {
                         "failed to send request"
                     );
 
-                    if attempt > 3 {
+                    if attempt > 1 {
                         return Err(ReplicaClientError::RetriesLimitExceededError {
                             url: url.to_string(),
                             attempts: attempt,
@@ -168,9 +166,9 @@ impl ReplicaClient {
 
 #[async_trait]
 impl ReplicaClientApi for ReplicaClient {
-    async fn get_proposal(&self, msg: GetProposalRequest) -> Result<Value> {
+    async fn get_proposal(&self) -> Result<Value> {
         let response = self.call(
-            msg,
+            Value::Null,
             "",
             |client, msg, url| {
                 Box::pin(async move {
@@ -184,7 +182,7 @@ impl ReplicaClientApi for ReplicaClient {
         // Ok(json!("test"))
     }
 
-    async fn verify_proposal(&self, msg: VerifyProposalRequest) -> Result<()> {
+    async fn verify_proposal(&self, msg: String) -> Result<()> {
         let response = self.call(
             msg,
             "",
@@ -205,7 +203,7 @@ impl ReplicaClientApi for ReplicaClient {
         // Ok(())
     }
 
-    async fn finalize_block(&self, msg: FinalizeBlockRequest) -> Result<()> {
+    async fn finalize_block(&self, msg: String) -> Result<()> {
         let response = self.call(
             msg,
             "",

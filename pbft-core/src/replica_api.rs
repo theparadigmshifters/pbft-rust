@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct JsonRpcRequest {
     pub jsonrpc: String,
     pub method: String,
@@ -30,29 +30,4 @@ pub struct JsonRpcResponse {
     #[serde(default, skip_serializing_if = "Value::is_null")]
     pub error: Value,
     pub id: Value,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GetProposalRequest {}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VerifyProposalRequest {
-    pub proposal: String,
-}
-
-impl VerifyProposalRequest {
-    pub fn new(proposal: String) -> Self {
-        Self { proposal }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FinalizeBlockRequest {
-    pub block: String,
-}
-
-impl FinalizeBlockRequest {
-    pub fn new(block: String) -> Self {
-        Self { block }
-    }
 }

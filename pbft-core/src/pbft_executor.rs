@@ -9,7 +9,7 @@ use crate::{
     api::{ProposeBlockMsgBroadcast, ProtocolMessageBroadcast}, broadcast::PbftBroadcaster, config::{NodeId, Secret}, error::Error, pbft_state::{
         CheckpointConsensusState, ConsensusLogIdx, PbftState, ReplicaState, RequestConsensusState,
         ViewChangeTimer,
-    }, replica_api::{FinalizeBlockRequest, GetProposalRequest, VerifyProposalRequest}, replica_client::ReplicaClientApi, Checkpoint, Commit, Config, MessageMeta, NewView, PrePrepare, Prepare, PreparedProof, ProposeBlockMsg, ProtocolMessage, Result, SignMessage, SignedCheckpoint, SignedCommit, SignedNewView, SignedPrePrepare, SignedPrepare, SignedViewChange, ViewChange, ViewChangeCheckpoint, NULL_DIGEST
+    }, replica_client::ReplicaClientApi, Checkpoint, Commit, Config, MessageMeta, NewView, PrePrepare, Prepare, PreparedProof, ProposeBlockMsg, ProtocolMessage, Result, SignMessage, SignedCheckpoint, SignedCommit, SignedNewView, SignedPrePrepare, SignedPrepare, SignedViewChange, ViewChange, ViewChangeCheckpoint, NULL_DIGEST
 };
 
 #[derive(Debug, Clone)]
@@ -103,14 +103,14 @@ impl PbftExecutor {
 
         let proposal = if is_leader {
             tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
-            match self.replica_client.get_proposal(GetProposalRequest{}).await {
+            match self.replica_client.get_proposal().await {
                 Ok(value) => {
                     info!(proposal = value.to_string(), "Success get proposal");
                     value.as_str().unwrap().to_string()
                 }
                 Err(error) => {
                     error!(err = ?error, "failed to get proposal");
-                    String::new()
+                    return;
                 }
             }
         } else {
@@ -339,7 +339,7 @@ impl PbftExecutor {
         proposal_broadcast: ProposeBlockMsgBroadcast,
     ) {
         // verify proposal
-        let r = self.replica_client.verify_proposal(VerifyProposalRequest{ proposal: proposal_broadcast.clone().proposal.block }).await;
+        let r = self.replica_client.verify_proposal(proposal_broadcast.clone().proposal.block).await;
         match r {
             Ok(_) => {
                 info!("Success verify proposal");
@@ -495,7 +495,7 @@ impl PbftExecutor {
 
         for p in executed_proposals {
             info!("Finalizing executed proposal: {}", p);
-            self.replica_client.finalize_block(FinalizeBlockRequest::new(p)).await.unwrap();
+            self.replica_client.finalize_block(p).await.unwrap();
 
             // After executing a proposal, we try to propose a new one
             self.get_and_propose_block().await;
