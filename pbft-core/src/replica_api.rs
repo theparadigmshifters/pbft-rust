@@ -25,9 +25,9 @@ impl JsonRpcRequest {
 #[derive(Serialize, Deserialize)]
 pub struct JsonRpcResponse {
     pub jsonrpc: String,
-    #[serde(skip_serializing_if = "Value::is_null")]
+    #[serde(default, skip_serializing_if = "Value::is_null")]
     pub result: Value,
-    #[serde(skip_serializing_if = "Value::is_null")]
+    #[serde(default, skip_serializing_if = "Value::is_null")]
     pub error: Value,
     pub id: Value,
 }

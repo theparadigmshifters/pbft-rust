@@ -199,7 +199,7 @@ impl ReplicaClientApi for ReplicaClient {
         if s == "ok" {
             Ok(())
         } else {
-            panic!("response is not ok")
+            panic!("verify_proposal, response is not ok")
         }
 
         // Ok(())
@@ -220,7 +220,7 @@ impl ReplicaClientApi for ReplicaClient {
         if s == "ok" {
             Ok(())
         } else {
-            panic!("response is not ok")
+            panic!("finalize_block, response is not ok")
         }
 
         // Ok(())
