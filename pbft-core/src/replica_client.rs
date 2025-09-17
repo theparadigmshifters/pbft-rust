@@ -1,10 +1,10 @@
 use std::{pin::Pin, time::Duration};
 use futures::Future;
 use l0::{Blk, Wp};
-use serde::Serialize;
+use serde::{ser::Error, Serialize};
 use serde_json::{json, Value};
 use tokio::process::Command;
-use tracing::{debug, error};
+use tracing::{debug, error, info};
 use zk::{AsBytes, Fr, Inputs};
 use crate::replica_api::{JsonRpcRequest, JsonRpcResponse};
 use async_trait::async_trait;
@@ -180,6 +180,13 @@ impl ReplicaClientApi for ReplicaClient {
             },
         ).await?;
 
+        if !response.error.is_null() {
+            return Err(ReplicaClientError::SerdeError {
+                context: "get_proposal failed",
+                error: serde_json::Error::custom(format!("RPC error: {}", response.error))
+            });
+        }
+
         Ok(response.result)
 
         // Ok(json!("test"))
@@ -196,14 +203,14 @@ impl ReplicaClientApi for ReplicaClient {
             },
         ).await?;
 
-        let s = response.result.as_str().unwrap().to_string();
-        if s == "ok" {
-            Ok(())
-        } else {
-            panic!("verify_proposal, response is not ok")
+        if !response.error.is_null() {
+            return Err(ReplicaClientError::SerdeError {
+                context: "verify_proposal failed",
+                error: serde_json::Error::custom(format!("RPC error: {}", response.error))
+            });
         }
 
-        // Ok(())
+        Ok(())
     }
 
     async fn finalize_block(&self, msg: String) -> Result<()> {
@@ -218,14 +225,14 @@ impl ReplicaClientApi for ReplicaClient {
             },
         ).await?;
 
-        let s = response.result.as_str().unwrap().to_string();
-        if s == "ok" {
-            Ok(())
-        } else {
-            panic!("finalize_block, response is not ok")
+        if !response.error.is_null() {
+            return Err(ReplicaClientError::SerdeError {
+                context: "verify_proposal failed",
+                error: serde_json::Error::custom(format!("RPC error: {}", response.error))
+            });
         }
 
-        // Ok(())
+        Ok(())
     }
 }
 
@@ -245,15 +252,15 @@ fn proof(block: String) -> String {
         })
     })
     .unwrap();
-    println!("PROOF: {:?}", output);
     let proof_hex = String::from_utf8(output.stdout).unwrap();
     let proof_bytes = hex::decode(proof_hex.trim()).unwrap();
     let proof = zk::Proof::dec(&mut proof_bytes.into_iter()).unwrap();
-    println!("PROOF DECODED: {:?}", proof);
 
     let vk: zk::Vk = zk::Vk::dec(&mut hex::decode(&"a68f8e3101a4b6ca051a1b3f4739f6cab2b6355dd6a7a2a093b0282b0b31f74737690d4c2c05083ef5028cb6d1af9757b634210775924e93e45e4a7f44a41860950bd06391326f99185c1002fd3ee3841ea1eedd34805e03bb1694ddf8d6566a931be469fe30cd9b0492cf61efd3c8d06516ab50b868e9b110955f7bd02433771c7dc8d0699d6a104e5d83bfc6b94788a37256ad812131bfb613d10e0192b6b673d9ea8a191782e671e9b7ee3af306713b73bdfd33fec4d6fa4c9b85aa213ff1c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a9679c273614e91810d738b6e46aef9e4b91366511ec93d3b66e0976048378aa906e67a6174192815006c349211668750000000103").unwrap().into_iter()).unwrap();
     let wp: Wp<Blk> = Wp { vk: vk, proof: proof, val: blk };
     wp.clone().check().unwrap();
     let r: Vec<u8> = wp.enc().collect();
-    encode(r)
+    let wp_blk = encode(r);
+    info!("wp block: {}", wp_blk);
+    wp_blk
 }
