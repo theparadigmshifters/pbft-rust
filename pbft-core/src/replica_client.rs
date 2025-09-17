@@ -13,12 +13,12 @@ use hex::{encode, decode};
 #[derive(Debug, thiserror::Error)]
 pub enum ReplicaClientError {
     #[error("Failed to send message to {url}, error: {error}")]
-    SendError { url: String, error: reqwest::Error },
+    SendError { url: String, error: String },
 
     #[error("Failed to parse response: {context}, error: {error}")]
     ResponseError {
         context: &'static str,
-        error: reqwest::Error,
+        error: String,
     },
 
     #[error("Serde error, context {context}, error: {error}")]
@@ -43,11 +43,11 @@ pub enum ReplicaClientError {
 
 impl ReplicaClientError {
     pub fn send_error(url: String) -> impl FnOnce(reqwest::Error) -> Self + 'static {
-        move |error| Self::SendError { url, error }
+        move |error| Self::SendError { url, error: error.to_string() }
     }
 
     pub fn response_error(context: &'static str) -> impl FnOnce(reqwest::Error) -> Self + 'static {
-        move |error| Self::ResponseError { context, error }
+        move |error| Self::ResponseError { context, error: error.to_string() }
     }
 
     pub fn serde_error(context: &'static str) -> impl FnOnce(serde_json::Error) -> Self + 'static {
@@ -181,9 +181,9 @@ impl ReplicaClientApi for ReplicaClient {
         ).await?;
 
         if !response.error.is_null() {
-            return Err(ReplicaClientError::SerdeError {
+            return Err(ReplicaClientError::ResponseError {
                 context: "get_proposal failed",
-                error: serde_json::Error::custom(format!("RPC error: {}", response.error))
+                error: format!("RPC error: {}", response.error)
             });
         }
 
@@ -203,10 +203,10 @@ impl ReplicaClientApi for ReplicaClient {
             },
         ).await?;
 
-        if !response.error.is_null() {
-            return Err(ReplicaClientError::SerdeError {
+         if !response.error.is_null() {
+            return Err(ReplicaClientError::ResponseError {
                 context: "verify_proposal failed",
-                error: serde_json::Error::custom(format!("RPC error: {}", response.error))
+                error: format!("RPC error: {}", response.error)
             });
         }
 
@@ -226,9 +226,9 @@ impl ReplicaClientApi for ReplicaClient {
         ).await?;
 
         if !response.error.is_null() {
-            return Err(ReplicaClientError::SerdeError {
-                context: "verify_proposal failed",
-                error: serde_json::Error::custom(format!("RPC error: {}", response.error))
+            return Err(ReplicaClientError::ResponseError {
+                context: "finalize_block failed",
+                error: format!("RPC error: {}", response.error)
             });
         }
 
