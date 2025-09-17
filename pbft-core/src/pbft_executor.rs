@@ -105,8 +105,8 @@ impl PbftExecutor {
             tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
             match self.replica_client.get_proposal().await {
                 Ok(value) => {
-                    info!(proposal = value.to_string(), "Success get proposal");
-                    value.to_string()
+                    info!(proposal = value.as_str().unwrap().to_string(), "Success get proposal");
+                    value.as_str().unwrap().to_string()
                 }
                 Err(error) => {
                     error!(err = ?error, "failed to get proposal");
