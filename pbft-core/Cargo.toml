@@ -6,6 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+zk = { path = "../../monorepo/zk" }
+l0 = { path = "../../monorepo/l0" }
 config = "0.13.3"
 futures = "0.3.28"
 base64 = "0.21"
@@ -16,13 +18,14 @@ reqwest = { version = "0.11.18", features = ["json"] }
 serde = { version = "1.0.163", features = ["derive"] }
 serde_json = "1.0.96"
 thiserror = "1.0.40"
-tokio = { version = "1.28.2", features = ["tokio-macros", "tracing", "macros"] }
+tokio = { version = "1.47.1", features = ["full"] }
 tracing = "0.1.37"
 tracing-subscriber = { version = "0.3.17", features = ["json", "env-filter"] }
 uuid = { version = "1.4.1", features = ["v4", "serde"] }
 crypto = { path = "../crypto" }
 blst = { git = "https://github.com/supranational/blst", branch = "master" }
 async-trait = "0.1"
+hex = "0.4.3"
 
 [dev-dependencies]
 lazy_static = "1.4.0"
