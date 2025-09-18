@@ -23,6 +23,7 @@ pub fn dev_config(self_id: NodeId, start_port: u16) -> Config {
         node_config: PbftNodeConfig {
             self_id,
             private_key_path: private_key_path.into(),
+            replica_address: format!("http://localhost:{}", start_port - 2000 + self_id.0 as u16),
             nodes: vec![
                 NodeConfig {
                     id: NodeId(0),

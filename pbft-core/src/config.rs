@@ -36,6 +36,7 @@ impl std::fmt::Display for NodeId {
 pub struct PbftNodeConfig {
     pub self_id: NodeId,
     pub private_key_path: String,
+    pub replica_address: String,
     pub nodes: Vec<NodeConfig>,
 }
 

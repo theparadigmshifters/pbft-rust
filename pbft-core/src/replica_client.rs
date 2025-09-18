@@ -65,12 +65,14 @@ pub trait ReplicaClientApi: Send + Sync {
 type Result<T> = std::result::Result<T, ReplicaClientError>;
 
 pub struct ReplicaClient {
+    replica_address: String,
     client: reqwest::Client,
 }
 
 impl ReplicaClient {
-    pub fn new() -> Self {
+    pub fn new(replica_address: String) -> Self {
         Self {
+            replica_address,
             client: reqwest::Client::new(),
         }
     }
@@ -85,7 +87,7 @@ impl ReplicaClient {
             ) -> Pin<Box<dyn Future<Output = Result<JsonRpcResponse>> + Send>>
             + Send + 'static,
     {
-        let url = format!("http://localhost:8000/{}", path);
+        let url = format!("{}/{}", self.replica_address, path);
         let client = self.client.clone();
         
         call_fn(client, msg, url).await

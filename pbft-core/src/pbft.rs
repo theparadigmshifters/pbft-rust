@@ -21,7 +21,7 @@ impl Pbft {
             config.node_config.nodes.clone(),
             keypair.clone(),
         ));
-        let replica_client = Arc::new(ReplicaClient::new());
+        let replica_client = Arc::new(ReplicaClient::new(config.node_config.replica_address.clone()));
         let pbft_executor =
             PbftExecutor::new(config.clone(), keypair, broadcaster.clone(), replica_client);
 
