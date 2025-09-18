@@ -2,7 +2,7 @@ use std::{collections::HashMap, ops::Deref};
 use base64::{Engine as _, engine::general_purpose};
 use hex::decode;
 use l0::Blk;
-use zk::{AsBytes, ToHash};
+use zk::{AsBytes, Fr, ToHash};
 use crate::config::{NodeId, Secret};
 use crypto::{Digest, PublicKey, Signature};
 use serde::{Deserialize, Serialize};
@@ -191,7 +191,7 @@ impl From<SignedCheckpoint> for ProtocolMessage {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Copy)]
 pub enum MessageType {
     Prepare,
     Commit
@@ -238,6 +238,17 @@ pub struct Commit {
 impl Commit {
     pub fn message_type(&self) -> MessageType {
         self.message_type.clone()
+    }
+
+    pub fn sum(&self) -> Vec<u8> {
+        let field1 = Fr::from(self.message_type as u64);
+        let field2 = Fr::from(self.replica_id.0);
+        let field3 = Fr::from(self.metadata.view);
+        let field4 = Fr::from(self.metadata.sequence);
+        let field5 = self.metadata.digest.to_field();
+        let elements = vec![field1, field2, field3, field4, field5];
+        let h: Vec<u8> = elements.hash().enc().collect();
+        h
     }
 }
 
@@ -315,12 +326,21 @@ pub struct SignedMessage<T> {
     pub pub_key: PublicKey,
 }
 
-impl<T: Serialize> SignedMessage<T> {
+impl<T: Serialize + 'static> SignedMessage<T> {
     pub fn new(message: T, keypair: &Secret) -> Result<Self> {
-        let serialized = bincode::serialize(&message).map_err(
-            crate::error::Error::bincode_error("failed to serialize message"),
-        )?;
-        let signature = keypair.secret.sign_msg(&serialized);
+        let msg = if std::any::TypeId::of::<T>() == std::any::TypeId::of::<Commit>() {
+            let commit_msg = unsafe {
+                let ptr = &message as *const T as *const Commit;
+                &*ptr
+            };
+            commit_msg.sum()
+        } else {
+            bincode::serialize(&message).map_err(
+                crate::error::Error::bincode_error("failed to serialize message"),
+            )?
+        };
+
+        let signature = keypair.secret.sign_msg(&msg);
         Ok(Self {
             message,
             signature,
@@ -329,11 +349,19 @@ impl<T: Serialize> SignedMessage<T> {
     }
 
     pub fn verify(&self) -> Result<bool> {
-        let serialized = bincode::serialize(&self.message).map_err(
-            crate::error::Error::bincode_error("failed to serialize message"),
-        )?;
+        let msg = if std::any::TypeId::of::<T>() == std::any::TypeId::of::<Commit>() {
+            let commit_msg = unsafe {
+                let ptr = &self.message as *const T as *const Commit;
+                &*ptr
+            };
+            commit_msg.sum()
+        } else {
+            bincode::serialize(&self.message).map_err(
+                crate::error::Error::bincode_error("failed to serialize message"),
+            )?
+        };
 
-        Ok(self.pub_key.verify_signature(&serialized, &self.signature))
+        Ok(self.pub_key.verify_signature(&msg, &self.signature))
     }
 
     pub fn pub_key_base64(&self) -> String {
@@ -341,7 +369,7 @@ impl<T: Serialize> SignedMessage<T> {
     }
 }
 
-impl<T: Serialize + ReplicaId> SignedMessage<T> {
+impl<T: Serialize + ReplicaId + 'static> SignedMessage<T> {
     pub fn verify_replica_signature(&self, replica_id: NodeId) -> Result<bool> {
         if self.replica_id() != replica_id {
             return Err(error::Error::InvalidMessageSignatureReplicaIdMismatch {
@@ -372,7 +400,7 @@ pub trait SignMessage<T: Serialize> {
     fn sign(self, keypair: &Secret) -> Result<SignedMessage<T>>;
 }
 
-impl<T: Serialize> SignMessage<T> for T {
+impl<T: Serialize + 'static> SignMessage<T> for T {
     fn sign(self, keypair: &Secret) -> Result<SignedMessage<T>> {
         SignedMessage::new(self, keypair)
     }

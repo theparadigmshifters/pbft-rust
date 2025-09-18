@@ -18,8 +18,8 @@ pub async fn start(
     info!("starting api server...");
     let api_handle = tokio::spawn(async move { api_server.run(inner_rx_cancel).await });
 
-    info!("wait for other nodes...");
-    tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
+    // info!("wait for other nodes...");
+    // tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
 
     let pbft_module_m = pbft_module;
     let pbft_executor_rx_cancel = inner_tx_cancel.subscribe();
