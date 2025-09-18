@@ -14,7 +14,14 @@ pub async fn start(
     let pbft_module = pbft_core::Pbft::new(config.pbft_config.clone())?;
     let pbft_module = Arc::new(pbft_module);
 
-    let pbft_module_m = pbft_module.clone();
+    let mut api_server = api::ApiServer::new(config.clone(), pbft_module.clone()).await;
+    info!("starting api server...");
+    let api_handle = tokio::spawn(async move { api_server.run(inner_rx_cancel).await });
+
+    info!("wait for other nodes...");
+    tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
+
+    let pbft_module_m = pbft_module;
     let pbft_executor_rx_cancel = inner_tx_cancel.subscribe();
     info!("starting pbft module...");
     let pbft_handle = tokio::spawn(async move {
@@ -22,10 +29,6 @@ pub async fn start(
             .start(pbft_executor_rx_cancel)
             .await
     });
-
-    let mut api_server = api::ApiServer::new(config.clone(), pbft_module).await;
-    info!("starting api server...");
-    let api_handle = tokio::spawn(async move { api_server.run(inner_rx_cancel).await });
 
     // This is not ideal in case api_handle or pbft_handle crashes
     rx_cancel.recv().await.unwrap();

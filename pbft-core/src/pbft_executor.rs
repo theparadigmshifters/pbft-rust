@@ -1408,5 +1408,5 @@ pub fn quorum_size(nodes_count: usize) -> usize {
 pub(crate) fn view_leader(nodes_count: u64, view: u64) -> u64 {
     // This is kind of ugly hack, but I want to start with replica 0 as a leader
     // Perhaps replicas should be 1-indexed...
-    (view - 1) % nodes_count
+    (view + 2) % nodes_count
 }

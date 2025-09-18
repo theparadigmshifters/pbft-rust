@@ -5,7 +5,7 @@ use crate::{
     Config,
 };
 
-pub const DEV_VIEW_CHANGE_TIMEOUT: Duration = Duration::from_secs(5);
+pub const DEV_VIEW_CHANGE_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub static DEV_PUBLIC_KEYS: [&str; 4] = [
     "tZt4D/AgndQedbcVa+3pC6oLf07h58fH/TrEhdTYEevqP8UbRq3+jGxho2iDIe6B",

@@ -3,7 +3,7 @@ replica1: PBFT_DEV=1 ../target/release/node
 replica2: PBFT_DEV=2 ../target/release/node
 replica3: PBFT_DEV=3 ../target/release/node
 
-# replica0: PBFT_DEV=0 ../target/release/node > logs/replica0.log 2>&1
-# replica1: PBFT_DEV=1 ../target/release/node > logs/replica1.log 2>&1
-# replica2: PBFT_DEV=2 ../target/release/node > logs/replica2.log 2>&1
-# replica3: PBFT_DEV=3 ../target/release/node > logs/replica3.log 2>&1
+# replica0: PBFT_DEV=0 ../target/release/node > ../logs/replica0.log 2>&1
+# replica1: PBFT_DEV=1 ../target/release/node > ../logs/replica1.log 2>&1
+# replica2: PBFT_DEV=2 ../target/release/node > ../logs/replica2.log 2>&1
+# replica3: PBFT_DEV=3 ../target/release/node > ../logs/replica3.log 2>&1
