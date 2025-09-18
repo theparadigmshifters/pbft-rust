@@ -27,6 +27,12 @@ impl Digest {
     pub fn to_field(&self) -> Fr {
         Fr::dec(&mut self.to_vec().into_iter()).expect("Failed to convert Digest to Fr")
     }
+
+    pub fn from_field(f: Fr) -> Self {
+        let mut bytes = [0u8; 32];
+        f.enc().enumerate().for_each(|(i, b)| bytes[i] = b);
+        Digest(bytes)
+    }
 }
 
 impl fmt::Debug for Digest {

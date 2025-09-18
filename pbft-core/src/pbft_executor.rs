@@ -9,7 +9,7 @@ use crate::{
     api::{ProposeBlockMsgBroadcast, ProtocolMessageBroadcast}, broadcast::PbftBroadcaster, config::{NodeId, Secret}, error::Error, pbft_state::{
         CheckpointConsensusState, ConsensusLogIdx, PbftState, ReplicaState, RequestConsensusState,
         ViewChangeTimer,
-    }, replica_client::ReplicaClientApi, Checkpoint, Commit, Config, MessageMeta, NewView, PrePrepare, Prepare, PreparedProof, ProposeBlockMsg, ProtocolMessage, Result, SignMessage, SignedCheckpoint, SignedCommit, SignedNewView, SignedPrePrepare, SignedPrepare, SignedViewChange, ViewChange, ViewChangeCheckpoint, NULL_DIGEST
+    }, replica_client::ReplicaClientApi, Checkpoint, Commit, Config, MessageMeta, MessageType, NewView, PrePrepare, Prepare, PreparedProof, ProposeBlockMsg, ProtocolMessage, Result, SignMessage, SignedCheckpoint, SignedCommit, SignedNewView, SignedPrePrepare, SignedPrepare, SignedViewChange, ViewChange, ViewChangeCheckpoint, NULL_DIGEST
 };
 
 #[derive(Debug, Clone)]
@@ -592,6 +592,7 @@ impl PbftExecutor {
 
     fn prepare_msg(&self, message_meta: MessageMeta) -> Result<SignedPrepare> {
         Prepare {
+            message_type: MessageType::Prepare,
             metadata: MessageMeta { ..message_meta },
             replica_id: self.node_id,
         }
@@ -603,6 +604,12 @@ impl PbftExecutor {
         state: &mut PbftState,
         prepare: SignedPrepare,
     ) -> Result<Option<ProtocolMessage>> {
+        if prepare.message_type != MessageType::Prepare {
+            return Err(Error::InvalidMessageType {
+                expected: MessageType::Prepare,
+                actual: prepare.message_type.clone(),
+            });
+        }
         // verify signature
         let ok = prepare.verify()?;
         if !ok {
@@ -669,6 +676,7 @@ impl PbftExecutor {
 
     fn commit_msg(&self, message_meta: MessageMeta) -> Result<SignedCommit> {
         Commit {
+            message_type: MessageType::Commit,
             metadata: MessageMeta { ..message_meta },
             replica_id: self.node_id,
         }
@@ -680,6 +688,12 @@ impl PbftExecutor {
         state: &mut PbftState,
         commit: SignedCommit,
     ) -> (Result<Vec<ProtocolMessage>>, Vec<String>) {
+        if commit.message_type != MessageType::Commit {
+            return (Err(Error::InvalidMessageType {
+                expected: MessageType::Commit,
+                actual: commit.message_type.clone(),
+            }), vec![]);
+        }
         // verify signature
         let ok = match commit.verify() {
             Ok(valid) => valid,
@@ -1208,6 +1222,12 @@ impl PbftExecutor {
             for (pub_key, prepare) in proof.prepares.iter() {
                 match trusted_pub_keys.get(pub_key.as_str()) {
                     Some(replica_id) => {
+                        if prepare.message_type() != MessageType::Prepare {
+                            return Err(Error::InvalidViewChange(format!(
+                                "Invalid message type for prepare proof: {}",
+                                pub_key
+                            )));
+                        }
                         if !prepare.verify_replica_signature(*replica_id)? {
                             return Err(Error::InvalidViewChange(format!(
                                 "Invalid signature for prepare proof: {}",

@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 
+use crypto::Digest;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
@@ -7,7 +8,7 @@ use crate::{
     config::NodeId,
     message_store::MessageStore,
     pbft_executor::{quorum_size, view_leader},
-    Checkpoint, MessageDigest, MessageMeta, SignedCheckpoint, SignedCommit,
+    Checkpoint, MessageMeta, SignedCheckpoint, SignedCommit,
     SignedPrePrepare, SignedPrepare, SignedViewChange,
 };
 
@@ -117,7 +118,7 @@ impl From<&MessageMeta> for ConsensusLogIdx {
 }
 
 pub struct RequestConsensusState {
-    pub digest: MessageDigest,
+    pub digest: Digest,
     pub pre_prepare: Option<SignedPrePrepare>,
     pub prepare: Vec<SignedPrepare>,
     pub commit: Vec<SignedCommit>,

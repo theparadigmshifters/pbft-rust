@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap};
+use crypto::Digest;
 
 use crate::{
-    AcceptedProposal, ProposeBlockMsg, MessageDigest,
+    AcceptedProposal, ProposeBlockMsg,
     NULL_DIGEST,
 };
 type MessageLog = BTreeMap<u64, StoredMessage>;
@@ -12,7 +13,7 @@ pub enum StoredMessage {
 }
 
 impl StoredMessage {
-    pub fn digest(&self) -> MessageDigest {
+    pub fn digest(&self) -> Digest {
         match self {
             StoredMessage::AcceptedProposal(req) => req.proposal.digest(),
             StoredMessage::Null { sequence: _ } => NULL_DIGEST,

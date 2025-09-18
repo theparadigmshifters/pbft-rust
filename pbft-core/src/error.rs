@@ -1,6 +1,7 @@
+use crypto::Digest;
 use thiserror;
 
-use crate::{config::NodeId, pbft_state::ReplicaState, MessageDigest};
+use crate::{config::NodeId, pbft_state::ReplicaState, MessageType};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -8,8 +9,8 @@ pub enum Error {
         "Request digest does not match consensus message: expected {expected:?}, actual {actual:?}"
     )]
     InvalidDigest {
-        expected: MessageDigest,
-        actual: MessageDigest,
+        expected: Digest,
+        actual: Digest,
     },
 
     #[error("Replica in state {state:?} cannot handle message of type {message_type:?}")]
@@ -34,16 +35,16 @@ pub enum Error {
     PrepareForViewAndSequenceDoesNotMatchDigest {
         view: u64,
         sequence: u64,
-        expected: MessageDigest,
-        actual: MessageDigest,
+        expected: Digest,
+        actual: Digest,
     },
 
     #[error("Commit for view {view:?} and sequence {sequence:?} does not match digest")]
     CommitForViewAndSequenceDoesNotMatchDigest {
         view: u64,
         sequence: u64,
-        expected: MessageDigest,
-        actual: MessageDigest,
+        expected: Digest,
+        actual: Digest,
     },
 
     #[error("PrePrepare message without client request")]
@@ -70,6 +71,12 @@ pub enum Error {
         error: serde_json::Error,
     },
 
+    #[error("Bincode error: {context}: {error}")]
+    BincodeError {
+        context: String,
+        error: bincode::Error,
+    },
+
     #[error("Broadcast error: {context}: {error}")]
     BroadcastError {
         context: String,
@@ -78,6 +85,9 @@ pub enum Error {
 
     #[error("Invalid replica id: {replica_id}")]
     InvalidReplicaID { replica_id: NodeId },
+
+    #[error("Invalid message type: expected {expected:?}, actual {actual:?}")]
+    InvalidMessageType { expected: MessageType, actual: MessageType },
 
     #[error("Invalid signature")]
     InvalidSignature,
@@ -115,6 +125,13 @@ impl Error {
 
     pub fn serde_json_error(context: &str) -> impl FnOnce(serde_json::Error) -> Self + '_ {
         move |error| Self::SerdeJSONError {
+            context: context.to_string(),
+            error,
+        }
+    }
+
+    pub fn bincode_error(context: &str) -> impl FnOnce(bincode::Error) -> Self + '_ {
+        move |error| Self::BincodeError {
             context: context.to_string(),
             error,
         }

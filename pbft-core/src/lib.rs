@@ -1,7 +1,10 @@
 use std::{collections::HashMap, ops::Deref};
 use base64::{Engine as _, engine::general_purpose};
+use hex::decode;
+use l0::Blk;
+use zk::{AsBytes, ToHash};
 use crate::config::{NodeId, Secret};
-use crypto::{PublicKey, Signature};
+use crypto::{Digest, PublicKey, Signature};
 use serde::{Deserialize, Serialize};
 
 pub mod api;
@@ -17,7 +20,7 @@ pub(crate) mod pbft_state;
 pub use crate::config::Config;
 pub use pbft::Pbft;
 pub use pbft_state::ReplicaState;
-pub const NULL_DIGEST: MessageDigest = MessageDigest([0; 16]);
+pub const NULL_DIGEST: Digest = Digest([0; 32]);
 
 pub mod dev;
 
@@ -55,10 +58,11 @@ pub struct ProposeBlockMsg {
 }
 
 impl ProposeBlockMsg {
-    pub fn digest(&self) -> MessageDigest {
-        let serialized = serde_json::to_string(&self).unwrap();
-        let digest = md5::compute(serialized);
-        MessageDigest(digest.0)
+    pub fn digest(&self) -> Digest {
+        let blk_bytes = decode(&self.block).unwrap();
+        let blk: Blk = Blk::dec(&mut blk_bytes.into_iter()).unwrap();
+        let digest = blk.hash();
+        Digest::from_field(digest)
     }
 }
 
@@ -100,32 +104,6 @@ pub enum ProtocolMessage {
 }
 
 impl ProtocolMessage {
-    pub fn new_preare(
-        meta: MessageMeta,
-        replica_id: NodeId,
-        keypair: &Secret,
-    ) -> Result<Self> {
-        let prepare = Prepare {
-            replica_id,
-            metadata: meta,
-        };
-        Ok(ProtocolMessage::Prepare(SignedPrepare::new(
-            prepare, keypair,
-        )?))
-    }
-
-    pub fn new_commit(
-        meta: MessageMeta,
-        replica_id: NodeId,
-        keypair: &Secret,
-    ) -> Result<Self> {
-        let commit = Commit {
-            replica_id,
-            metadata: meta,
-        };
-        Ok(ProtocolMessage::Commit(SignedCommit::new(commit, keypair)?))
-    }
-
     pub fn message_type_str(&self) -> &'static str {
         match self {
             ProtocolMessage::PrePrepare(_) => "PrePrepare",
@@ -167,27 +145,6 @@ impl ProtocolMessage {
             ProtocolMessage::Checkpoint(m) => Some(m.replica_id),
             ProtocolMessage::ViewChange(m) => Some(m.replica_id),
             ProtocolMessage::NewView(_m) => None,
-        }
-    }
-
-    pub fn verify_signature(&self, replica_id: NodeId) -> Result<bool> {
-        if let Some(msg_replica_id) = self.replica_id() {
-            if msg_replica_id != replica_id {
-                return Err(error::Error::InvalidMessageSignatureReplicaIdMismatch {
-                    expected: replica_id.0,
-                    actual: msg_replica_id.0,
-                });
-            }
-        }
-
-        // TODO: Macro to extract the inner?
-        match self {
-            ProtocolMessage::PrePrepare(m) => m.verify(),
-            ProtocolMessage::Prepare(m) => m.verify(),
-            ProtocolMessage::Commit(m) => m.verify(),
-            ProtocolMessage::Checkpoint(m) => m.verify(),
-            ProtocolMessage::ViewChange(m) => m.verify(),
-            ProtocolMessage::NewView(m) => m.verify(),
         }
     }
 
@@ -235,19 +192,16 @@ impl From<SignedCheckpoint> for ProtocolMessage {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct MessageDigest(pub [u8; 16]);
-
-impl std::fmt::Display for MessageDigest {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", general_purpose::STANDARD.encode(self.0))
-    }
+pub enum MessageType {
+    Prepare,
+    Commit
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MessageMeta {
     pub view: u64,
     pub sequence: u64,
-    pub digest: MessageDigest,
+    pub digest: Digest,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -263,14 +217,28 @@ impl PrePrepare {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Prepare {
+    pub message_type: MessageType,
     pub replica_id: NodeId,
     pub metadata: MessageMeta,
 }
 
+impl Prepare {
+    pub fn message_type(&self) -> MessageType {
+        self.message_type.clone()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Commit {
+    pub message_type: MessageType,
     pub replica_id: NodeId,
     pub metadata: MessageMeta,
+}
+
+impl Commit {
+    pub fn message_type(&self) -> MessageType {
+        self.message_type.clone()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -349,10 +317,10 @@ pub struct SignedMessage<T> {
 
 impl<T: Serialize> SignedMessage<T> {
     pub fn new(message: T, keypair: &Secret) -> Result<Self> {
-        let serialized = serde_json::to_string(&message).map_err(
-            crate::error::Error::serde_json_error("failed to serialize message"),
+        let serialized = bincode::serialize(&message).map_err(
+            crate::error::Error::bincode_error("failed to serialize message"),
         )?;
-        let signature = keypair.secret.sign_msg(serialized.as_bytes());
+        let signature = keypair.secret.sign_msg(&serialized);
         Ok(Self {
             message,
             signature,
@@ -361,11 +329,11 @@ impl<T: Serialize> SignedMessage<T> {
     }
 
     pub fn verify(&self) -> Result<bool> {
-        let serialized = serde_json::to_string(&self.message).map_err(
-            crate::error::Error::serde_json_error("failed to serialize message"),
+        let serialized = bincode::serialize(&self.message).map_err(
+            crate::error::Error::bincode_error("failed to serialize message"),
         )?;
 
-        Ok(self.pub_key.verify_signature(serialized.as_bytes(), &self.signature))
+        Ok(self.pub_key.verify_signature(&serialized, &self.signature))
     }
 
     pub fn pub_key_base64(&self) -> String {
