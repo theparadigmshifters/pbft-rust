@@ -172,67 +172,67 @@ impl ReplicaClient {
 #[async_trait]
 impl ReplicaClientApi for ReplicaClient {
     async fn get_proposal(&self) -> Result<Value> {
-        // let response = self.call(
-        //     Value::Null,
-        //     "",
-        //     |client, msg, url| {
-        //         Box::pin(async move {
-        //             ReplicaClient::send_with_retires(client, "get_proposal", &msg, &url).await
-        //         })
-        //     },
-        // ).await?;
+        let response = self.call(
+            Value::Null,
+            "",
+            |client, msg, url| {
+                Box::pin(async move {
+                    ReplicaClient::send_with_retires(client, "get_proposal", &msg, &url).await
+                })
+            },
+        ).await?;
 
-        // if !response.error.is_null() {
-        //     return Err(ReplicaClientError::ResponseError {
-        //         context: "get_proposal failed",
-        //         error: format!("RPC error: {}", response.error)
-        //     });
-        // }
+        if !response.error.is_null() {
+            return Err(ReplicaClientError::ResponseError {
+                context: "get_proposal failed",
+                error: format!("RPC error: {}", response.error)
+            });
+        }
 
-        // Ok(response.result)
+        Ok(response.result)
 
-        Ok(json!("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000dead00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"))
+        //Ok(json!("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000dead00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"))
     }
 
     async fn verify_proposal(&self, msg: String) -> Result<()> {
-        // let response = self.call(
-        //     msg,
-        //     "",
-        //     |client, msg, url| {
-        //         Box::pin(async move {
-        //             ReplicaClient::send_with_retires(client, "verify_proposal", &msg, &url).await
-        //         })
-        //     },
-        // ).await?;
+        let response = self.call(
+            msg,
+            "",
+            |client, msg, url| {
+                Box::pin(async move {
+                    ReplicaClient::send_with_retires(client, "verify_proposal", &msg, &url).await
+                })
+            },
+        ).await?;
 
-        //  if !response.error.is_null() {
-        //     return Err(ReplicaClientError::ResponseError {
-        //         context: "verify_proposal failed",
-        //         error: format!("RPC error: {}", response.error)
-        //     });
-        // }
+         if !response.error.is_null() {
+            return Err(ReplicaClientError::ResponseError {
+                context: "verify_proposal failed",
+                error: format!("RPC error: {}", response.error)
+            });
+        }
 
         Ok(())
     }
 
     async fn finalize_block(&self, msg: String) -> Result<()> {
-        // let msg = proof(msg);
-        // let response = self.call(
-        //     msg,
-        //     "",
-        //     |client, msg, url| {
-        //         Box::pin(async move {
-        //             ReplicaClient::send_with_retires(client, "finalize_block", &msg, &url).await
-        //         })
-        //     },
-        // ).await?;
+        let msg = proof(msg);
+        let response = self.call(
+            msg,
+            "",
+            |client, msg, url| {
+                Box::pin(async move {
+                    ReplicaClient::send_with_retires(client, "finalize_block", &msg, &url).await
+                })
+            },
+        ).await?;
 
-        // if !response.error.is_null() {
-        //     return Err(ReplicaClientError::ResponseError {
-        //         context: "finalize_block failed",
-        //         error: format!("RPC error: {}", response.error)
-        //     });
-        // }
+        if !response.error.is_null() {
+            return Err(ReplicaClientError::ResponseError {
+                context: "finalize_block failed",
+                error: format!("RPC error: {}", response.error)
+            });
+        }
 
         Ok(())
     }

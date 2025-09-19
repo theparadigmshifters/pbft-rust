@@ -258,7 +258,7 @@ impl PbftExecutor {
         loop {
             tokio::select! {
                 _ = rx_cancel.recv() => {
-                    info!("received cancel signal");
+                    info!("received cancel signal, stop pbft executor event loop");
                     return;
                 }
                 event = event_rx.recv() => {

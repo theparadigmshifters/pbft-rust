@@ -75,8 +75,6 @@ struct State {
     local_id: NodeId,
     discovered_peers: Arc<Mutex<HashSet<PeerId>>>,
     command_tx: mpsc::UnboundedSender<NodeCommand>,
-    shutdown_tx: mpsc::UnboundedSender<()>,
-    event_handle: JoinHandle<()>,
 }
 
 pub struct P2pLibp2p {
@@ -92,7 +90,7 @@ impl P2pLibp2p {
 }
 
 impl P2pLibp2p {
-    pub fn init(&mut self, on_msg: impl Fn(NodeId, Vec<u8>) -> Result<()> + Send + Sync + 'static) -> Result<()> {
+    pub fn init(&mut self, inner_rx_cancel: tokio::sync::broadcast::Receiver<()>, on_msg: impl Fn(NodeId, Vec<u8>) -> Result<()> + Send + Sync + 'static) -> Result<()> {
         if self.state.is_some() {
             return Err(anyhow::anyhow!("Node already initialized"));
         }
@@ -101,16 +99,15 @@ impl P2pLibp2p {
         let local_peer_id = PeerId::from(keypair.public());
         info!("Using peer ID: {}", local_peer_id);
 
-        let (shutdown_tx, shutdown_rx) = mpsc::unbounded_channel();
         let (command_tx, command_rx) = mpsc::unbounded_channel();
         let discovered_peers = Arc::new(Mutex::new(HashSet::new()));
 
-        let event_handle = self.spawn_event_loop(keypair, shutdown_rx, command_rx, discovered_peers.clone(), on_msg)?;
+        self.spawn_event_loop(keypair, inner_rx_cancel, command_rx, discovered_peers.clone(), on_msg)?;
 
         let local_id = self.committee_config.committee.get(&local_peer_id)
             .copied()
             .ok_or_else(|| anyhow::anyhow!("Local peer ID not found in committee config"))?;
-        self.state = Some(State { local_peer_id, local_id, discovered_peers, command_tx, shutdown_tx, event_handle });
+        self.state = Some(State { local_peer_id, local_id, discovered_peers, command_tx });
 
         Ok(())
     }
@@ -203,7 +200,7 @@ impl P2pLibp2p {
     }
 
     fn spawn_event_loop(
-        &self, keypair: identity::Keypair, mut shutdown_rx: mpsc::UnboundedReceiver<()>, mut command_rx: mpsc::UnboundedReceiver<NodeCommand>, discovered_peers: Arc<Mutex<HashSet<PeerId>>>,
+        &self, keypair: identity::Keypair, mut shutdown_rx: tokio::sync::broadcast::Receiver<()>, mut command_rx: mpsc::UnboundedReceiver<NodeCommand>, discovered_peers: Arc<Mutex<HashSet<PeerId>>>,
         on_msg: impl Fn(NodeId, Vec<u8>) -> Result<()> + Send + Sync + 'static,
     ) -> Result<JoinHandle<()>> {
         let config = self.config.clone();
@@ -227,7 +224,7 @@ impl P2pLibp2p {
                 tokio::select! {
                     _ = shutdown_rx.recv() => {
                         info!("Shutting down P2P node");
-                        break;
+                        return;
                     }
                     _ = periodic_bootstrap.tick() => {
                         if !config.bootstrap_nodes.is_empty() {
@@ -449,15 +446,6 @@ impl P2pLibp2p {
         for peer in peers_to_disconnect {
             warn!("Disconnecting {} due to message error", peer);
             swarm.disconnect_peer_id(peer).ok();
-        }
-    }
-}
-
-impl Drop for P2pLibp2p {
-    fn drop(&mut self) {
-        if let Some(state) = self.state.take() {
-            let _ = state.shutdown_tx.send(());
-            state.event_handle.abort();
         }
     }
 }

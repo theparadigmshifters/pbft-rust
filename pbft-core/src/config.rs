@@ -50,7 +50,6 @@ pub struct CommitteeConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeConfig {
     pub id: NodeId,
-    pub addr: String,
     pub public_key: String,
 }
 

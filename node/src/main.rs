@@ -20,7 +20,7 @@ async fn main() {
             .parse::<u64>()
             .expect("failed to parse dev replica as u64");
 
-        dev::dev_config(dev_replica, 10000)
+        dev::dev_config(dev_replica, 8000)
     } else {
         config::AppConfig::new(None).unwrap()
     };

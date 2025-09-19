@@ -25,26 +25,22 @@ pub fn dev_config(self_id: NodeId, start_port: u16) -> Config {
         node_config: PbftNodeConfig {
             self_id,
             private_key_path: private_key_path.into(),
-            replica_address: format!("http://localhost:{}", start_port - 2000 + self_id.0 as u16),
+            replica_address: format!("http://localhost:{}", start_port + self_id.0 as u16),
             nodes: vec![
                 NodeConfig {
                     id: NodeId(0),
-                    addr: format!("http://localhost:{}", start_port),
                     public_key: DEV_PUBLIC_KEYS[0].to_string(),
                 },
                 NodeConfig {
                     id: NodeId(1),
-                    addr: format!("http://localhost:{}", start_port + 1),
                     public_key: DEV_PUBLIC_KEYS[1].to_string(),
                 },
                 NodeConfig {
                     id: NodeId(2),
-                    addr: format!("http://localhost:{}", start_port + 2),
                     public_key: DEV_PUBLIC_KEYS[2].to_string(),
                 },
                 NodeConfig {
                     id: NodeId(3),
-                    addr: format!("http://localhost:{}", start_port + 3),
                     public_key: DEV_PUBLIC_KEYS[3].to_string(),
                 },
             ],

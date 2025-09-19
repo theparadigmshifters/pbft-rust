@@ -12,7 +12,7 @@ pub async fn start(
     let (msg_tx, msg_rx) = mpsc::unbounded_channel::<(NodeId, Vec<u8>)>();
 
     let mut p2p = P2pLibp2p::default_from_committee(config.pbft_config.clone().committee_config);
-    p2p.init(move |id, payload: Vec<u8>| {
+    p2p.init(inner_rx_cancel, move |id, payload: Vec<u8>| {
         if let Err(e) = msg_tx.send((id, payload)) {
             error!("Failed to send message to PBFT module: {}", e);
         }
@@ -41,7 +41,8 @@ pub async fn start(
         }
     }
 
-    let mut pbft_module = pbft_core::Pbft::new(config.pbft_config.clone(), p2p, msg_rx)?;
+    let pbft_msg_rx_cancel = inner_tx_cancel.subscribe();
+    let mut pbft_module = pbft_core::Pbft::new(config.pbft_config.clone(), p2p, msg_rx, pbft_msg_rx_cancel)?;
 
     let pbft_executor_rx_cancel = inner_tx_cancel.subscribe();
     info!("starting pbft module...");
