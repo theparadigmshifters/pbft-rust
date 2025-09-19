@@ -1,8 +1,8 @@
 use std::sync::{Arc};
-use crypto::{PublicKey, Signature};
-
+use tokio::sync::mpsc;
+use tracing::{error};
 use crate::{
-    api::ProposeBlockMsgBroadcast, broadcast::Broadcaster, config::NodeId, pbft_executor::{quorum_size, PbftExecutor}, replica_client::ReplicaClient, ProtocolMessage
+    api::{P2pMessage}, config::NodeId, p2p_node::P2pLibp2p, pbft_executor::{quorum_size, Event, PbftExecutor}, replica_client::ReplicaClient
 };
 
 pub struct Pbft {
@@ -13,17 +13,34 @@ pub struct Pbft {
 impl Pbft {
     pub fn new(
         config: crate::Config,
+        p2p: P2pLibp2p,
+        mut msg_rx: mpsc::UnboundedReceiver<(NodeId, Vec<u8>)>,
     ) -> Result<Self, crate::error::Error> {
         let keypair = Arc::new(config.node_config.get_keypair());
 
-        let broadcaster = Arc::new(Broadcaster::new(
-            config.node_config.self_id,
-            config.node_config.nodes.clone(),
-            keypair.clone(),
-        ));
-        let replica_client = Arc::new(ReplicaClient::new(config.node_config.replica_address.clone()));
+        let replica_client = ReplicaClient::new(config.node_config.replica_address.clone());
         let pbft_executor =
-            PbftExecutor::new(config.clone(), keypair, broadcaster.clone(), replica_client);
+            PbftExecutor::new(config.clone(), keypair, p2p, Arc::new(replica_client));
+        let event_tx = pbft_executor.event_tx.clone();
+        tokio::spawn(async move {
+            while let Some((sender_id, raw_msg)) = msg_rx.recv().await {
+                match serde_json::from_slice::<P2pMessage>(&raw_msg) {
+                    Ok(P2pMessage::Proposal(proposal_msg)) => {
+                        if event_tx.send(Event::ProposeBlockBroadcast(sender_id, proposal_msg).into()).await.is_err() {
+                            error!("Failed to send ProposeBlockBroadcast event");
+                        }
+                    }
+                    Ok(P2pMessage::Consensus(consensus_msg)) => {
+                        if event_tx.send(Event::ProtocolMessage(sender_id, consensus_msg.message).into()).await.is_err() {
+                            error!("Failed to send ProtocolMessage event");
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to deserialize P2P message: {}", e);
+                    }
+                }
+            }
+        });
 
         Ok(Self {
             pbft_executor,
@@ -32,7 +49,7 @@ impl Pbft {
     }
 
     pub async fn start(
-        &self,
+        &mut self,
         executor_rx_cancel: tokio::sync::broadcast::Receiver<()>,
     ) {
         self.pbft_executor.run(executor_rx_cancel).await;
@@ -40,57 +57,5 @@ impl Pbft {
 
     pub fn quorum_size(&self) -> usize {
         quorum_size(self.nodes_config.nodes.len())
-    }
-
-    pub fn handle_propose_block_broadcast(
-        &self,
-        sender_id: u64,
-        message: ProposeBlockMsgBroadcast,
-    ) -> Result<(), crate::error::Error> {
-        self.pbft_executor
-            .queue_request_broadcast(sender_id, message);
-        Ok(())
-    }
-
-    pub fn handle_consensus_message(
-        &self,
-        sender_id: u64,
-        message: ProtocolMessage,
-    ) -> Result<(), crate::error::Error> {
-        self.pbft_executor
-            .queue_protocol_message(sender_id, message);
-        Ok(())
-    }
-
-    pub fn verify_request_signature(
-        &self,
-        replica_id: u64,
-        signature: &str,
-        msg: &[u8],
-    ) -> Result<(), crate::error::Error> {
-        if replica_id > self.nodes_config.nodes.len() as u64 {
-            return Err(crate::error::Error::InvalidReplicaID {
-                replica_id: NodeId(replica_id),
-            });
-        }
-        let peer = &self.nodes_config.nodes[replica_id as usize];
-
-        let public_key = PublicKey::decode_base64(&peer.public_key).map_err(
-            crate::error::Error::base64_error("failed to parse public key from bytes"),
-        )?;
-
-        let signature = Signature::decode_base64(&signature).map_err(
-            crate::error::Error::base64_error("failed to parse signature from bytes"),
-        )?;
-
-        let is_ok = public_key.verify_signature(msg, &signature);
-        if !is_ok {
-            return Err(crate::error::Error::InvalidSignature);
-        }
-        Ok(())
-    }
-
-    pub fn get_state(&self) -> crate::api::PbftNodeState {
-        self.pbft_executor.get_state()
     }
 }

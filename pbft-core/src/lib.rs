@@ -8,7 +8,6 @@ use crypto::{Digest, PublicKey, Signature};
 use serde::{Deserialize, Serialize};
 
 pub mod api;
-pub mod broadcast;
 pub mod config;
 pub mod error;
 pub mod replica_client;
@@ -16,6 +15,8 @@ pub mod replica_api;
 pub(crate) mod message_store;
 pub mod pbft;
 pub mod pbft_executor;
+pub mod p2p_node;
+pub mod msg_protocol;
 pub(crate) mod pbft_state;
 pub use crate::config::Config;
 pub use pbft::Pbft;
@@ -241,7 +242,7 @@ impl Commit {
     }
 
     pub fn sum(&self) -> Vec<u8> {
-        let field1 = Fr::from(self.message_type as u64);
+        let field1 = Fr::from(self.message_type as u32);
         let field2 = Fr::from(self.replica_id.0);
         let field3 = Fr::from(self.metadata.view);
         let field4 = Fr::from(self.metadata.sequence);

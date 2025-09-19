@@ -32,3 +32,19 @@ pub struct PbftNodeState {
     // TODO: extend if needed
     // TODO: make it possible to dump log messages too - with sequence, view etc.
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum P2pMessage {
+    Proposal(ProposeBlockMsgBroadcast),
+    Consensus(ProtocolMessageBroadcast),
+}
+
+impl P2pMessage {
+    pub fn from_proposal(proposal: ProposeBlockMsgBroadcast) -> Self {
+        Self::Proposal(proposal)
+    }
+
+    pub fn from_consensus(consensus: ProtocolMessageBroadcast) -> Self {
+        Self::Consensus(consensus)
+    }
+}

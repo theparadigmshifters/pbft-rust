@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap, fs, time::Duration
 };
+use libp2p::PeerId;
 use thiserror::Error;
 use crypto::generate_production_keypair;
 use crypto::{PublicKey, SecretKey};
@@ -17,6 +18,7 @@ pub struct Config {
     #[serde(default = "default_view_change_timeout")]
     pub view_change_timeout: Duration,
     pub executor_config: ExecutorConfig,
+    pub committee_config: CommitteeConfig,
 }
 
 fn default_view_change_timeout() -> Duration {
@@ -38,6 +40,11 @@ pub struct PbftNodeConfig {
     pub private_key_path: String,
     pub replica_address: String,
     pub nodes: Vec<NodeConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommitteeConfig {
+    pub committee: HashMap<PeerId, NodeId>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

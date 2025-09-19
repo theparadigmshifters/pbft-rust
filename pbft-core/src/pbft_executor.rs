@@ -6,7 +6,7 @@ use base64::{Engine as _, engine::general_purpose};
 use tracing::{debug, error, info, warn};
 
 use crate::{
-    api::{ProposeBlockMsgBroadcast, ProtocolMessageBroadcast}, broadcast::PbftBroadcaster, config::{NodeId, Secret}, error::Error, pbft_state::{
+    api::{ProposeBlockMsgBroadcast, ProtocolMessageBroadcast}, config::{NodeId, Secret}, error::Error, p2p_node::P2pLibp2p, pbft_state::{
         CheckpointConsensusState, ConsensusLogIdx, PbftState, ReplicaState, RequestConsensusState,
         ViewChangeTimer,
     }, replica_client::ReplicaClientApi, Checkpoint, Commit, Config, MessageMeta, MessageType, NewView, PrePrepare, Prepare, PreparedProof, ProposeBlockMsg, ProtocolMessage, Result, SignMessage, SignedCheckpoint, SignedCommit, SignedNewView, SignedPrePrepare, SignedPrepare, SignedViewChange, ViewChange, ViewChangeCheckpoint, NULL_DIGEST
@@ -53,7 +53,7 @@ pub struct EventOccurance {
 pub type EventQueue = tokio::sync::mpsc::Sender<EventOccurance>;
 
 pub struct PbftExecutor {
-    event_tx: EventQueue,
+    pub event_tx: EventQueue,
     // HACK: We wrap event_rx in Mutex<Option<...>> so that we we can swap it
     // and take the full ownership of the receiver without mutable referencing
     // the Executor itself.
@@ -62,10 +62,9 @@ pub struct PbftExecutor {
     node_id: NodeId,
     config: Config,
     pbft_state: Arc<Mutex<PbftState>>,
-
     keypair: Arc<Secret>,
 
-    broadcaster: Arc<dyn PbftBroadcaster>,
+    p2p: P2pLibp2p,
     replica_client: Arc<dyn ReplicaClientApi>,
 }
 
@@ -73,7 +72,7 @@ impl PbftExecutor {
     pub fn new(
         config: Config,
         keypair: Arc<Secret>,
-        broadcaster: Arc<dyn PbftBroadcaster>,
+        p2p: P2pLibp2p,
         replica_client: Arc<dyn ReplicaClientApi>,
     ) -> Self {
         let (tx, rx) = tokio::sync::mpsc::channel(10000);
@@ -90,12 +89,12 @@ impl PbftExecutor {
             config,
             pbft_state: Arc::new(Mutex::new(state)),
             keypair,
-            broadcaster,
+            p2p,
             replica_client,
         }
     }
 
-    pub async fn get_and_propose_block(&self) {
+    pub async fn get_and_propose_block(&mut self) {
         let is_leader = {
             let state = self.pbft_state.lock().unwrap();
             matches!(state.replica_state, ReplicaState::Leader { .. })
@@ -122,7 +121,7 @@ impl PbftExecutor {
         }
     }
 
-    pub fn propose_block(&self, proposal: String) -> Result<()> {
+    pub fn propose_block(&mut self, proposal: String) -> Result<()> {
         let mut state = self.pbft_state.lock().unwrap();
 
         match state.replica_state {
@@ -175,15 +174,17 @@ impl PbftExecutor {
                 self.queue_event(event.into());
 
                 // Broadcast the request with PrePrepare
-                self.broadcaster
-                    .broadcast_operation(ProposeBlockMsgBroadcast {
-                        proposal,
-                        sequence_number: message_sequence,
-                        pre_prepare,
-                    });
+                if let Err(e) = self.p2p.broadcast_proposal(ProposeBlockMsgBroadcast {
+                    proposal,
+                    sequence_number: message_sequence,
+                    pre_prepare,
+                }) {
+                    error!(err = ?e, "failed to broadcast proposal");
+                }
                 // Broadcast leader's own Prepare
-                self.broadcaster
-                    .broadcast_consensus_message(ProtocolMessageBroadcast::new(prepare_cm));
+                if let Err(e) = self.p2p.broadcast_consensus_message(ProtocolMessageBroadcast::new(prepare_cm)) {
+                    error!(err = ?e, "failed to broadcast prepare message");
+                }
                 Ok(())
             }
         }
@@ -209,15 +210,6 @@ impl PbftExecutor {
         state.timer = Some(ViewChangeTimer {
             task: timer_task,
         });
-    }
-
-    pub fn queue_protocol_message(&self, sender_id: u64, msg: ProtocolMessage) {
-        // TODO: Teoretically we could return error here so that the sender retries
-        self.queue_event(Event::ProtocolMessage(NodeId(sender_id), msg).into())
-    }
-
-    pub fn queue_request_broadcast(&self, sender_id: u64, msg: ProposeBlockMsgBroadcast) {
-        self.queue_event(Event::ProposeBlockBroadcast(NodeId(sender_id), msg).into())
     }
 
     fn queue_event(&self, event: EventOccurance) {
@@ -246,7 +238,7 @@ impl PbftExecutor {
     // NOTE: the drawback of this approach is that we are limmited to single
     // therad, however we lock the state on every event anyway, so making it
     // concurent would not bring much benefit.
-    pub async fn run(&self, mut rx_cancel: tokio::sync::broadcast::Receiver<()>) {
+    pub async fn run(&mut self, mut rx_cancel: tokio::sync::broadcast::Receiver<()>) {
         // init propose
         self.get_and_propose_block().await;
 
@@ -295,7 +287,7 @@ impl PbftExecutor {
         }
     }
 
-    fn view_change_timer_event(&self) {
+    fn view_change_timer_event(&mut self) {
         let mut state = self.pbft_state.lock().unwrap();
 
         if state.timer.is_none() {
@@ -320,11 +312,11 @@ impl PbftExecutor {
                 self.queue_event(event.into());
 
                 // broadcast view change
-                self
-                .broadcaster
-                .broadcast_consensus_message(ProtocolMessageBroadcast {
+                if let Err(e) = self.p2p.broadcast_consensus_message(ProtocolMessageBroadcast {
                     message: ProtocolMessage::ViewChange(vc),
-                })
+                }) {
+                    error!(err = ?e, "failed to broadcast view change message");
+                }
             }
             Err(e) => {
                 error!(error=?e, "failed to initiate view change, reverting to replica state");
@@ -334,7 +326,7 @@ impl PbftExecutor {
     }
 
     async fn proposal_broadcast_event(
-        &self,
+        &mut self,
         sender_id: NodeId,
         proposal_broadcast: ProposeBlockMsgBroadcast,
     ) {
@@ -358,8 +350,9 @@ impl PbftExecutor {
                 self.queue_event(event.into());
 
                 // broadcast prepare
-                self.broadcaster
-                    .broadcast_consensus_message(ProtocolMessageBroadcast::new(prepare_cm));
+                if let Err(e) = self.p2p.broadcast_consensus_message(ProtocolMessageBroadcast::new(prepare_cm)) {
+                    error!(err = ?e, "failed to broadcast prepare message");
+                }
             }
             Err(err) => {
                 error!(err = ?err, "failed to process request broadcast event")
@@ -391,7 +384,7 @@ impl PbftExecutor {
     }
 
     async fn protocol_message_event(
-        &self,
+        &mut self,
         sender_id: NodeId,
         protocol_message: ProtocolMessage,
         attempt: u32,
@@ -407,8 +400,9 @@ impl PbftExecutor {
                         self.queue_event(event.into());
                     }
 
-                    self.broadcaster
-                        .broadcast_consensus_message(ProtocolMessageBroadcast::new(p_msg.clone()));
+                    if let Err(e) = self.p2p.broadcast_consensus_message(ProtocolMessageBroadcast::new(p_msg.clone())) {
+                        error!(err = ?e, "failed to broadcast consensus message");
+                    }
 
                     if is_new_view {
                         info!("processed NewView message, attempting to propose new block");
@@ -446,7 +440,7 @@ impl PbftExecutor {
     }
 
     async fn process_protocol_message(
-        &self,
+        &mut self,
         message: ProtocolMessage,
         sender_id: NodeId,
     ) -> Result<Vec<ProtocolMessage>> {

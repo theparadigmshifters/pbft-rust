@@ -1,25 +1,11 @@
 use std::{
-    net::{IpAddr, Ipv4Addr},
     path::PathBuf,
 };
 use serde::{Deserialize};
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct AppConfig {
-    #[serde(default = "default_addr")]
-    pub listen_addr: IpAddr,
-    #[serde(default = "default_port")]
-    pub port: u16,
-
     pub pbft_config: pbft_core::Config,
-}
-
-fn default_port() -> u16 {
-    3000
-}
-
-fn default_addr() -> IpAddr {
-    IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0))
 }
 
 impl AppConfig {

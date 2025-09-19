@@ -1,7 +1,7 @@
-replica0: PBFT_DEV=0 ../target/release/node
-replica1: PBFT_DEV=1 ../target/release/node
-replica2: PBFT_DEV=2 ../target/release/node
-replica3: PBFT_DEV=3 ../target/release/node
+replica0: PBFT_DEV=0 EON_PORT=51700 EON_PRIVATE_KEY='CAESQOSHMmqvV0VrWA4dSSce6bMoKMOGjWqnQUCXuZ+DgNMaLyCsigeQ2PaeakkicETu+uCyFV+ptsyDtV5X/gXwgxg=' ../target/release/node
+replica1: PBFT_DEV=1 EON_PORT=51701 EON_PRIVATE_KEY='CAESQIn/Jo6k6OFogsX62uZ+zaQBqoSD0Bp2tmPjaJKIrpQoAqnaeW4tgRbB8SGhmQ8gmDaBmufGLAeNZr/Xho22QZU=' EON_BOOTSTRAP_NODES='/ip4/127.0.0.1/tcp/51700/p2p/12D3KooWCzLEA2ttgMryB4ZfaiuY5es5kqVMFfS94dCW2jZe8Tqh' ../target/release/node
+replica2: PBFT_DEV=2 EON_PORT=51702 EON_PRIVATE_KEY='CAESQAyuKZbKY1jxAacZSX/djequmaWnGykh2DUcL2yURn6ipokoVJWVCUa5YKtj0apDscm3N+SUscNcaozBnR7OoxI=' EON_BOOTSTRAP_NODES='/ip4/127.0.0.1/tcp/51701/p2p/12D3KooW9zmCkaoQ4i5VQ87iZF2azP2hvYTKk2oD1eArP5au1y96' ../target/release/node
+replica3: PBFT_DEV=3 EON_PORT=51703 EON_PRIVATE_KEY='CAESQEEgWQN6bFVVT1SS48D47bLPuvEfSpKyOJfhBcyU0O9T1LUv86zYGO3abob5ElFUHtdPhrz483u1NuMhbmun6Ho=' EON_BOOTSTRAP_NODES='/ip4/127.0.0.1/tcp/51701/p2p/12D3KooW9zmCkaoQ4i5VQ87iZF2azP2hvYTKk2oD1eArP5au1y96' ../target/release/node
 
 # replica0: PBFT_DEV=0 ../target/release/node > ../logs/replica0.log 2>&1
 # replica1: PBFT_DEV=1 ../target/release/node > ../logs/replica1.log 2>&1

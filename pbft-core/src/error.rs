@@ -5,6 +5,9 @@ use crate::{config::NodeId, pbft_state::ReplicaState, MessageType};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("Internal error: {0}")]
+    Internal(String),
+
     #[error(
         "Request digest does not match consensus message: expected {expected:?}, actual {actual:?}"
     )]
@@ -77,12 +80,6 @@ pub enum Error {
         error: bincode::Error,
     },
 
-    #[error("Broadcast error: {context}: {error}")]
-    BroadcastError {
-        context: String,
-        error: crate::broadcast::BroadcastError,
-    },
-
     #[error("Invalid replica id: {replica_id}")]
     InvalidReplicaID { replica_id: NodeId },
 
@@ -132,15 +129,6 @@ impl Error {
 
     pub fn bincode_error(context: &str) -> impl FnOnce(bincode::Error) -> Self + '_ {
         move |error| Self::BincodeError {
-            context: context.to_string(),
-            error,
-        }
-    }
-
-    pub fn broadcast_error(
-        context: &str,
-    ) -> impl FnOnce(crate::broadcast::BroadcastError) -> Self + '_ {
-        move |error| Self::BroadcastError {
             context: context.to_string(),
             error,
         }

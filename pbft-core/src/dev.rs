@@ -1,7 +1,9 @@
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
+use std::str::FromStr;
+use libp2p::PeerId;
 
 use crate::{
-    config::{ExecutorConfig, NodeConfig, NodeId, PbftNodeConfig},
+    config::{CommitteeConfig, ExecutorConfig, NodeConfig, NodeId, PbftNodeConfig},
     Config,
 };
 
@@ -46,6 +48,14 @@ pub fn dev_config(self_id: NodeId, start_port: u16) -> Config {
                     public_key: DEV_PUBLIC_KEYS[3].to_string(),
                 },
             ],
+        },
+        committee_config: CommitteeConfig {
+            committee: HashMap::from([
+                (PeerId::from_str("12D3KooWCzLEA2ttgMryB4ZfaiuY5es5kqVMFfS94dCW2jZe8Tqh").unwrap(), NodeId(0)),
+                (PeerId::from_str("12D3KooW9zmCkaoQ4i5VQ87iZF2azP2hvYTKk2oD1eArP5au1y96").unwrap(), NodeId(1)),
+                (PeerId::from_str("12D3KooWM2T9d3gDtf9FAEoxpGmg6KKzDXdqnhHjtMjBpUbtkABb").unwrap(), NodeId(2)),
+                (PeerId::from_str("12D3KooWQ8gqtWAwieojh1vkVMychjUe2uzqk4QJwrbxewkKjE5o").unwrap(), NodeId(3)),
+            ]),
         },
         checkpoint_frequency: 10,
         executor_config: ExecutorConfig {
