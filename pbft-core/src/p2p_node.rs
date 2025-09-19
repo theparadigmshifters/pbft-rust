@@ -12,7 +12,6 @@ use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::mpsc;
-use tokio::task::JoinHandle;
 use crate::{config::{CommitteeConfig, NodeId}, msg_protocol::{MsgEvent, MsgProtocol}};
 
 #[derive(NetworkBehaviour)]
@@ -102,7 +101,7 @@ impl P2pLibp2p {
         let (command_tx, command_rx) = mpsc::unbounded_channel();
         let discovered_peers = Arc::new(Mutex::new(HashSet::new()));
 
-        self.spawn_event_loop(keypair, inner_rx_cancel, command_rx, discovered_peers.clone(), on_msg)?;
+        self.spawn_event_loop(keypair, inner_rx_cancel, command_rx, discovered_peers.clone(), on_msg);
 
         let local_id = self.committee_config.committee.get(&local_peer_id)
             .copied()
@@ -202,10 +201,10 @@ impl P2pLibp2p {
     fn spawn_event_loop(
         &self, keypair: identity::Keypair, mut shutdown_rx: tokio::sync::broadcast::Receiver<()>, mut command_rx: mpsc::UnboundedReceiver<NodeCommand>, discovered_peers: Arc<Mutex<HashSet<PeerId>>>,
         on_msg: impl Fn(NodeId, Vec<u8>) -> Result<()> + Send + Sync + 'static,
-    ) -> Result<JoinHandle<()>> {
+    ) {
         let config = self.config.clone();
         let committee_config = self.committee_config.clone();
-        let handle = tokio::spawn(async move {
+        tokio::spawn(async move {
             let mut swarm = Self::build_swarm(committee_config, keypair, &config, on_msg).await;
 
             if let Err(e) = Self::setup_listening(&mut swarm, config.port).await {
@@ -249,8 +248,6 @@ impl P2pLibp2p {
                 }
             }
         });
-
-        Ok(handle)
     }
 
     pub async fn wait_for_min_peers(&self) -> Result<()> {

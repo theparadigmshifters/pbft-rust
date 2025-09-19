@@ -71,16 +71,8 @@ impl MsgProtocol {
     }
 
     pub fn register_peer(&mut self, peer_id: PeerId) {
-        let id = self.committee_config.committee.get(&peer_id);
-        match id {
-            Some(id) => {
-                       self.id_to_peer.insert(id.clone(), peer_id);
-            },
-            None => {
-                warn!("Unknown peer connected: {}", peer_id);
-                return;
-            }
-        }
+        let id = self.committee_config.committee.get(&peer_id).expect("PeerId should exist in p2p peers");
+        self.id_to_peer.insert(id.clone(), peer_id);
     }
 
     pub fn unregister_peer(&mut self, peer_id: &PeerId) {
@@ -91,6 +83,10 @@ impl MsgProtocol {
     pub fn get_peers_to_disconnect(&mut self) -> Vec<PeerId> {
         std::mem::take(&mut self.peers_to_disconnect)
     }
+
+    fn is_peer_in_committee(&self, peer_id: PeerId) -> bool {
+        self.committee_config.committee.contains_key(&peer_id)
+    }
 }
 
 impl NetworkBehaviour for MsgProtocol {
@@ -100,6 +96,10 @@ impl NetworkBehaviour for MsgProtocol {
     fn handle_established_inbound_connection(
         &mut self, connection_id: libp2p::swarm::ConnectionId, peer: PeerId, local_addr: &libp2p::Multiaddr, remote_addr: &libp2p::Multiaddr,
     ) -> Result<libp2p::swarm::THandler<Self>, libp2p::swarm::ConnectionDenied> {
+        if !self.is_peer_in_committee(peer) {
+            warn!("Rejecting connection from non-committee peer: {}", peer);
+            return Err(libp2p::swarm::ConnectionDenied::new("Peer not in committee"));
+        }
         self.register_peer(peer);
         self.request_response.handle_established_inbound_connection(connection_id, peer, local_addr, remote_addr)
     }
@@ -107,6 +107,10 @@ impl NetworkBehaviour for MsgProtocol {
     fn handle_established_outbound_connection(
         &mut self, connection_id: libp2p::swarm::ConnectionId, peer: PeerId, addr: &libp2p::Multiaddr, role_override: libp2p::core::Endpoint, port_use: libp2p::core::transport::PortUse,
     ) -> Result<libp2p::swarm::THandler<Self>, libp2p::swarm::ConnectionDenied> {
+        if !self.is_peer_in_committee(peer) {
+            warn!("Rejecting connection from non-committee peer: {}", peer);
+            return Err(libp2p::swarm::ConnectionDenied::new("Peer not in committee"));
+        }
         self.register_peer(peer);
         self.request_response.handle_established_outbound_connection(connection_id, peer, addr, role_override, port_use)
     }
